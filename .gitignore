@@ -27,3 +27,6 @@ data/*.pdf
 *.pdf
 *.docx
 *.epub
+
+# temp
+klasifikasi_perokok_jambi.html

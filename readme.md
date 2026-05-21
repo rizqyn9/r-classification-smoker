@@ -47,34 +47,44 @@ graph TD
     B[ssn202403_kor_ind1.dbf <br> 483MB] -->|Python Binary Streaming| D[ssn202403_kor_ind1_jambi.csv <br> 8.0MB]
     C -->|R left_join & Filter| E[Merge Data & EDA]
     D -->|R left_join & Filter| E
-    E -->|ROSE Resampling| F[Model Training: Extra Trees & CatBoost]
-    F -->|Threshold 0.30| G[Model Validation & Metrics]
-    G -->|fastshap & shapviz| H[SHAP Interpretation]
+    E -->|ROSE Resampling| F[Model Training: Random Forest & XGBoost]
+    F -->|Threshold 0.40| G[Model Validation & Metrics]
+    G -->|Feature Importance| H[XGBoost Feature Importance]
 ```
 
 ### Pembagian Tugas Alat:
 - **Python (Data Engineering)**: Digunakan untuk streaming biner berkas database Susenas (`.dbf`) nasional berukuran besar (**~740 MB**), menyaring, dan mengekstraksi data Provinsi Jambi menjadi berkas CSV yang super ringan (**~10 MB**). Ini menghemat penggunaan RAM hingga **98.5%**.
-- **R (Data Science & Modeling)**: Digunakan untuk analisis statistik interaktif, visualisasi distribusi geografis kabupaten/kota, pembentukan model klasifikasi ensemble (**Extra Trees** via `ranger` & **CatBoost**), serta visualisasi atribusi fitur menggunakan nilai SHAP.
+- **R (Data Science & Modeling)**: Digunakan untuk analisis statistik interaktif, visualisasi distribusi geografis kabupaten/kota, pembentukan model klasifikasi ensemble (**Random Forest** via `ranger` & **XGBoost**), serta visualisasi kepentingan fitur (*feature importance*).
 
 ---
 
-## 📁 Struktur Direktori
+## 📁 Struktur Direktori & Dokumentasi Alur
+
+Untuk mempermudah pemahaman alur kerja proyek ini, dokumentasi telah dibagi menjadi beberapa bagian mendalam:
 
 ```
 r-classification/
-├── .gitignore                    # Konfigurasi pengabaian data biner nasional
-├── readme.md                     # Dokumentasi utama proyek
+├── readme.md                     # Halaman utama (Dokumentasi Ringkas)
 ├── klasifikasi_perokok_jambi.qmd # Pipeline EDA, Modeling, & Evaluasi (Quarto)
 ├── 001.R                         # Pustaka/dependensi R utama
+├── docs/                         # 📖 Dokumentasi Detail Alur Proyek
+│   ├── 01_data_engineering.md    # Detail Ekstraksi Data Susenas Nasional (Python)
+│   ├── 02_preprocessing.md       # Detail Preprocessing & Seleksi Fitur (Python)
+│   └── 03_modeling.md            # Detail Pemodelan Machine Learning & Evaluasi (R)
 ├── scripts/                      # Skrip Pipeline Data Engineering (Python)
 │   ├── sample_dbf.py             # Alat inspeksi cepat skema berkas biner DBF
-│   └── extract_jambi.py          # Generator ekstrak CSV Jambi (O(1) Memory)
+│   ├── extract_jambi.py          # Generator ekstrak CSV Jambi (O(1) Memory)
+│   └── 01_preprocess.py          # Skrip penyatuan data, filtering, & imputasi
 └── data/                         # Direktori Data
     ├── ssn202403_kor_rt_jambi.csv   # Ekstrak RT Jambi (2.6 MB) - [Tracked]
     ├── ssn202403_kor_ind1_jambi.csv # Ekstrak Individu Jambi (8.0 MB) - [Tracked]
-    ├── ssn202403_kor_rt.dbf         # Mentah RT Nasional (258 MB) - [Ignored]
-    └── ssn202403_kor_ind1.dbf       # Mentah Individu Nasional (483 MB) - [Ignored]
+    └── processed_krt_jambi.csv      # Dataset bersih siap modeling (348 KB) - [Tracked]
 ```
+
+### Navigasi Dokumentasi Alur Proyek:
+1. **[Tahap 1: Data Engineering (Ekstraksi)](docs/01_data_engineering.md)** - Bagaimana kita mengekstrak data Jambi secara hemat memori dari dataset nasional yang sangat besar.
+2. **[Tahap 2: Preprocessing & Feature Engineering](docs/02_preprocessing.md)** - Bagaimana kita memfilter KRT, mengimputasi missing values, dan menyatukan level data rumah tangga dan individu.
+3. **[Tahap 3: Pemodelan & Evaluasi](docs/03_modeling.md)** - Proses melatih model (Random Forest & XGBoost), mengatasi ketidakseimbangan kelas dengan ROSE, dan melakukan evaluasi serta penyesuaian threshold.
 
 ---
 

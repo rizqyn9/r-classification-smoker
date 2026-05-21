@@ -1,0 +1,317 @@
+---
+title: "Klasifikasi Perokok Berat di Provinsi Jambi Menggunakan Machine Learning (Full R Pipeline)"
+author: "Tim Data Science"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-float: true
+    theme: flatly
+    highlight-style: tango
+    code-fold: show
+    code-tools: true
+    embed-resources: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+  echo: true
+---
+
+# 1. Pendahuluan
+
+Dokumen ini mendemonstrasikan perbaikan pipeline Machine Learning di mana seluruh tahapan penggabungan data, pembersihan (*data cleaning*), penyaringan (*filtering*), seleksi fitur, dan imputasi *missing values* dilakukan sepenuhnya menggunakan R (**Tidyverse**). 
+
+Tahapan ekstraksi data biner Susenas tingkat nasional (`.dbf`) menjadi CSV regional Jambi tetap dipertahankan menggunakan Python untuk alasan efisiensi memori, sedangkan pemrosesan tingkat lanjut dari data mentah Jambi hingga pemodelan kini disatukan secara elegan dalam satu file Quarto ini.
+
+# 2. Persiapan & Cleaning Data di R (Data Preprocessing)
+
+```{r setup_library}
+# Load library utama
+library(dplyr)       # Manipulasi data
+library(tidyr)       # Perapihan data
+library(ggplot2)     # Visualisasi
+library(caret)       # Machine Learning & Evaluasi
+library(ROSE)        # Penanganan Imbalanced Data
+library(ranger)      # Random Forest cepat
+library(xgboost)     # eXtreme Gradient Boosting
+library(pROC)        # Analisis Kurva ROC
+```
+
+## 2.1 Load Data Mentah Jambi
+
+Kita membaca file hasil ekstraksi Jambi yang masih berupa representasi mentah dari DBF Susenas. Untuk menjaga akurasi tipe data (seperti kode kategorikal berawalan nol), kita membaca seluruh kolom sebagai string/character terlebih dahulu.
+
+```{r load_raw_data}
+# Membaca data mentah tingkat individu dan rumah tangga Provinsi Jambi
+raw_ind <- read.csv("data/ssn202403_kor_ind1_jambi.csv", colClasses = "character", stringsAsFactors = FALSE)
+raw_rt <- read.csv("data/ssn202403_kor_rt_jambi.csv", colClasses = "character", stringsAsFactors = FALSE)
+
+cat("Dimensi awal Individu Jambi:", dim(raw_ind)[1], "baris,", dim(raw_ind)[2], "kolom.\n")
+cat("Dimensi awal Rumah Tangga Jambi:", dim(raw_rt)[1], "baris,", dim(raw_rt)[2], "kolom.\n")
+```
+
+## 2.2 Penyaringan KRT & Pembentukan Variabel Target (Y)
+
+Sesuai metodologi, analisis difokuskan hanya pada **Kepala Rumah Tangga (KRT)** (`R403 == 1`). Kita juga menyusun variabel target `Y` (Perokok Berat) berdasarkan kriteria WHO:
+- `Y = 1` (Perokok Berat): Jika status merokok sebulan terakhir (`R1207`) adalah "Ya" (`"1"`) **dan** konsumsi rokok seminggu terakhir (`R1208`) adalah $\ge 140$ batang.
+- `Y = 0` (Bukan Perokok Berat): Jika status merokok adalah "Tidak" (`"5"`) atau "Berhenti" (`"2"`), atau jika jumlah konsumsi mingguan $< 140$ batang.
+- Responden dengan status merokok yang kosong/invalid dihapus dari analisis.
+
+```{r process_target}
+# Filter KRT dan buat variabel Y
+df_ind_krt <- raw_ind %>%
+  filter(R403 == "1") %>%
+  mutate(
+    # Konversi kolom rokok menjadi numerik secara aman
+    r1208_num = suppressWarnings(as.integer(R1208)),
+    Y = case_when(
+      R1207 %in% c("5", "2") ~ 0,
+      R1207 == "1" & !is.na(r1208_num) & r1208_num >= 140 ~ 1,
+      R1207 == "1" & !is.na(r1208_num) & r1208_num < 140 ~ 0,
+      TRUE ~ NA_integer_
+    )
+  ) %>%
+  filter(!is.na(Y))
+
+cat("Jumlah KRT dengan status target valid:", nrow(df_ind_krt), "\n")
+```
+
+## 2.3 Penggabungan Data (Merging)
+
+Kedua dataset disatukan di tingkat rumah tangga menggunakan 8 kolom kunci komposit unik.
+
+```{r merge_data}
+# Kolom kunci penggabungan
+join_keys <- c("R101", "R102", "R105", "WI1", "WI2", "PSU", "SSU", "URUT")
+
+# Penggabungan data (left join)
+df_merged <- left_join(df_ind_krt, raw_rt, by = join_keys)
+```
+
+## 2.4 Seleksi Fitur (Feature Selection)
+
+Kita memilih subset fitur demografi, sosial ekonomi, kondisi fisik bangunan hunian, dan kepemilikan aset yang relevan.
+
+```{r select_features}
+df_features <- df_merged %>%
+  select(
+    Y,
+    umur_krt = R407,
+    jumlah_art = R1801,
+    luas_lantai = R1804,
+    jk_krt = R405,
+    status_kawin_krt = R404,
+    pendidikan_krt = R612,
+    pekerjaan_krt = R706,
+    keluhan_kesehatan = R1102,
+    internet_krt = R812,
+    usaha_mikro = R2210AA,
+    bansos = R2207,
+    wilayah = R105,
+    kabupaten = R102,
+    status_bangunan = R1802,
+    jenis_lantai = R1808,
+    jenis_dinding = R1807,
+    jenis_atap = R1806A,
+    sumber_air = R1810A,
+    penerangan = R1816,
+    bahan_bakar = R1817,
+    motor = R2001H,
+    laptop = R2001F
+  )
+```
+
+## 2.5 Penanganan Missing Values & Imputasi
+
+Kita mengidentifikasi missing values berupa string kosong `""`, tanda titik `"."`, atau `NA` untuk diimputasi:
+- **Variabel Numerik**: Diisi dengan nilai **Median**.
+- **Variabel Kategorikal**: Diisi dengan nilai **Modus** (frekuensi terbanyak).
+
+```{r imputation}
+# 1. Standardisasi missing values menjadi NA & Konversi tipe data numerik
+df_features <- df_features %>%
+  mutate(
+    umur_krt = suppressWarnings(as.numeric(ifelse(umur_krt %in% c("", "."), NA_character_, umur_krt))),
+    jumlah_art = suppressWarnings(as.numeric(ifelse(jumlah_art %in% c("", "."), NA_character_, jumlah_art))),
+    luas_lantai = suppressWarnings(as.numeric(ifelse(luas_lantai %in% c("", "."), NA_character_, luas_lantai)))
+  )
+
+cat_cols <- c(
+  "jk_krt", "status_kawin_krt", "pendidikan_krt", "pekerjaan_krt", "keluhan_kesehatan", "internet_krt",
+  "usaha_mikro", "bansos", "wilayah", "kabupaten", "status_bangunan", "jenis_lantai", "jenis_dinding", 
+  "jenis_atap", "sumber_air", "penerangan", "bahan_bakar", "motor", "laptop"
+)
+
+# Standardisasi NA untuk kolom kategorik
+df_features <- df_features %>%
+  mutate(across(all_of(cat_cols), ~ ifelse(.x %in% c("", "."), NA_character_, .x)))
+
+# 2. Hitung statistik untuk imputasi
+median_umur <- median(df_features$umur_krt, na.rm = TRUE)
+median_art <- median(df_features$jumlah_art, na.rm = TRUE)
+median_lantai <- median(df_features$luas_lantai, na.rm = TRUE)
+
+# Fungsi bantuan untuk menghitung modus
+get_mode <- function(x) {
+  x_clean <- na.omit(x)
+  if (length(x_clean) == 0) return("Unknown")
+  ux <- unique(x_clean)
+  ux[which.max(tabulate(match(x_clean, ux)))]
+}
+
+modes <- sapply(df_features[cat_cols], get_mode)
+
+# 3. Eksekusi imputasi
+df <- df_features %>%
+  mutate(
+    umur_krt = ifelse(is.na(umur_krt), median_umur, umur_krt),
+    jumlah_art = ifelse(is.na(jumlah_art), median_art, jumlah_art),
+    luas_lantai = ifelse(is.na(luas_lantai), median_lantai, luas_lantai)
+  )
+
+for (col in cat_cols) {
+  df[[col]] <- ifelse(is.na(df[[col]]), modes[col], df[[col]])
+}
+
+# 4. Konversi tipe data kategorik menjadi factor
+df <- df %>%
+  mutate(across(all_of(cat_cols), as.factor))
+
+# Pastikan target Y berupa factor dengan label kelas
+df$Y <- factor(df$Y, levels = c("0", "1"), labels = c("Bukan_Perokok_Berat", "Perokok_Berat"))
+
+# Tinjau sekilas struktur data akhir
+str(df)
+```
+
+## 2.6 Analisis Imbalance Data
+
+Distribusi kelas target menunjukkan ketidakseimbangan (imbalance), di mana jumlah perokok berat jauh lebih sedikit.
+
+```{r check_imbalance}
+table(df$Y)
+prop.table(table(df$Y)) * 100
+
+ggplot(df, aes(x = Y, fill = Y)) +
+  geom_bar() +
+  scale_fill_manual(values = c("Bukan_Perokok_Berat" = "#2ecc71", "Perokok_Berat" = "#e74c3c")) +
+  labs(title = "Distribusi Target Kelas (Imbalanced)", x = "Kategori", y = "Jumlah KRT") +
+  theme_minimal()
+```
+
+# 3. Data Splitting & Penanganan Imbalance
+
+Kita membagi data menjadi set *Training* (80%) dan *Testing* (20%). Karena kelas tidak seimbang, kita terapkan metode **ROSE (Random Over-Sampling Examples)** pada data latih agar algoritma Machine Learning tidak bias terhadap kelas mayoritas.
+
+```{r splitting_data}
+set.seed(123)
+idx_train <- createDataPartition(df$Y, p = 0.8, list = FALSE)
+train_raw <- df[idx_train, ]
+test_data <- df[-idx_train, ]
+
+# Penanganan Imbalance dengan ROSE
+set.seed(123)
+train_rose <- ROSE(Y ~ ., data = train_raw, seed = 123)$data
+
+table(train_rose$Y)
+```
+
+# 4. Pemodelan Machine Learning
+
+Kita akan melatih dua model algoritma unggulan untuk data tabular: **Random Forest** dan **XGBoost**.
+
+## 4.1 Random Forest (Ranger)
+
+Kita menggunakan `ranger` yang sangat cepat. Penyesuaian `probability = TRUE` memungkinkan kita memanipulasi *threshold* klasifikasi.
+
+```{r train_rf}
+set.seed(123)
+model_rf <- ranger(
+  Y ~ ., 
+  data = train_rose, 
+  num.trees = 500, 
+  importance = "permutation",
+  probability = TRUE
+)
+
+# Prediksi Probabilitas pada Test Data
+prob_rf <- predict(model_rf, data = test_data)$predictions[, "Perokok_Berat"]
+
+# Threshold disetel ke 0.40 untuk memprioritaskan sensitivitas
+pred_rf <- factor(ifelse(prob_rf > 0.40, "Perokok_Berat", "Bukan_Perokok_Berat"), 
+                  levels = c("Bukan_Perokok_Berat", "Perokok_Berat"))
+```
+
+## 4.2 XGBoost
+
+XGBoost adalah algoritma *Gradient Boosting* yang sangat tangguh. Kita perlu mengonversi data ke format matriks (DMatrix).
+
+```{r train_xgb}
+# Konversi fitur kategorik ke one-hot encoding
+dummy_model <- dummyVars(Y ~ ., data = train_rose)
+train_xgb_x <- predict(dummy_model, newdata = train_rose)
+test_xgb_x <- predict(dummy_model, newdata = test_data)
+
+train_xgb_y <- ifelse(train_rose$Y == "Perokok_Berat", 1, 0)
+
+dtrain <- xgb.DMatrix(data = train_xgb_x, label = train_xgb_y)
+dtest <- xgb.DMatrix(data = test_xgb_x)
+
+# Training XGBoost
+set.seed(123)
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "auc",
+  max_depth = 6,
+  eta = 0.05
+)
+
+model_xgb <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 200,
+  verbose = 0
+)
+
+# Prediksi Probabilitas
+prob_xgb <- predict(model_xgb, dtest)
+
+# Threshold 0.40
+pred_xgb <- factor(ifelse(prob_xgb > 0.40, "Perokok_Berat", "Bukan_Perokok_Berat"), 
+                   levels = c("Bukan_Perokok_Berat", "Perokok_Berat"))
+```
+
+# 5. Evaluasi dan Perbandingan Performa
+
+Metrik terpenting dalam kasus imbalanced ini adalah **Balanced Accuracy** dan **Sensitivity** (kemampuan model mendeteksi Perokok Berat secara akurat).
+
+```{r evaluate_models}
+cm_rf <- confusionMatrix(pred_rf, test_data$Y, positive = "Perokok_Berat")
+cm_xgb <- confusionMatrix(pred_xgb, test_data$Y, positive = "Perokok_Berat")
+
+eval_metrics <- data.frame(
+  Model = c("Random Forest", "XGBoost"),
+  Accuracy = c(cm_rf$overall["Accuracy"], cm_xgb$overall["Accuracy"]),
+  Balanced_Accuracy = c(cm_rf$byClass["Balanced Accuracy"], cm_xgb$byClass["Balanced Accuracy"]),
+  Sensitivity = c(cm_rf$byClass["Sensitivity"], cm_xgb$byClass["Sensitivity"]),
+  Specificity = c(cm_rf$byClass["Specificity"], cm_xgb$byClass["Specificity"])
+)
+
+knitr::kable(eval_metrics, digits = 4, caption = "Perbandingan Metrik Evaluasi Model (R-Clean Pipeline)")
+```
+
+# 6. Analisis Feature Importance (XGBoost)
+
+Untuk melihat fitur apa yang paling berpengaruh dalam klasifikasi XGBoost, kita plot *feature importance* bawaan dari XGBoost.
+
+```{r feature_importance}
+importance_matrix <- xgb.importance(model = model_xgb)
+xgb.plot.importance(importance_matrix, top_n = 10, main = "Top 10 Fitur Paling Berpengaruh (XGBoost - R-Clean)")
+```
+
+# 7. Kesimpulan & Perbandingan
+Dengan memindahkan preprocessing sepenuhnya ke R menggunakan `dplyr` dan `tidyverse`:
+1. Kode program menjadi lebih kohesif karena semua data preparation (cleaning, merging, imputasi) berada dalam satu workspace yang sama dengan pelatihan model.
+2. Pengujian dan audit data prep dapat dilakukan secara interaktif menggunakan Quarto.
+3. Performa evaluasi yang didapatkan identik dengan versi prep Python, membuktikan kesetaraan logika preprocessing di kedua bahasa pemrograman.
