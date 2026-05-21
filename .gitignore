@@ -1,0 +1,29 @@
+# Raw Large Data Files (Susenas raw files)
+data/ssn202403_kor_ind1.dbf
+data/ssn202403_kor_ind2.dbf
+data/ssn202403_kor_rt.dbf
+data/ssn202403_kor_mig.dbf
+data/Data Mikro*.zip
+data/*.xlsx
+data/*.pdf
+
+# Filtered/Generated Jambi data (optional, but keep it tracked or ignored as needed)
+# data/*_jambi.csv
+
+# R Specific
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+.Rprofile
+.Rapp.history
+.RDataTmp
+
+# Quarto & Knitr Output
+.quarto/
+*_files/
+*_cache/
+*.html
+*.pdf
+*.docx
+*.epub

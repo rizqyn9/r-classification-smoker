@@ -1,0 +1,899 @@
+---
+title: "Klasifikasi Perokok Berat di Provinsi Jambi Menggunakan Extra Trees dan CatBoost"
+author: "Kelompok 4"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-float: true
+    toc-location: left
+    number-sections: true
+    theme: flatly
+    highlight-style: tango
+    code-fold: show
+    code-tools: true
+    fig-width: 9
+    fig-height: 5
+    fig-align: center
+    df-print: paged
+    embed-resources: true
+    self-contained: true
+execute:
+  warning: false
+  message: false
+  echo: true
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+# Pendahuluan
+
+Penelitian ini bertujuan untuk mengklasifikasikan rumah tangga dengan
+kategori perokok berat menggunakan data Susenas 2024 Provinsi Jambi.
+
+Karena distribusi variabel target bersifat imbalanced, penelitian
+menggunakan metode ROSE untuk penanganan imbalance data dan
+membandingkan performa model Extra Trees dan CatBoost.
+
+Selain itu, penelitian juga menggunakan SHAP (SHapley Additive
+exPlanations) untuk meningkatkan interpretabilitas model machine
+learning.
+
+# Load Library
+
+```{r}
+# ── Baca & Manipulasi Data ─────────────────────────────────
+library(foreign)      # Membaca file .dbf (format dBase dari SPSS/Stata)
+library(dplyr)        # Manipulasi data: filter, mutate, select, dll.
+library(tidyr)        # Reshaping: pivot_longer, pivot_wider
+library(tibble)       # rownames_to_column, as_tibble
+
+# ── Visualisasi ────────────────────────────────────────────
+library(ggplot2)      # Grafik berbasis Grammar of Graphics
+
+# ── Machine Learning & Evaluasi ────────────────────────────
+library(caret)        # createDataPartition, confusionMatrix, dummyVars
+library(ROSE)         # Random Over-Sampling Examples (penanganan imbalanced)
+library(ranger)       # Implementasi cepat Extra Trees / Random Forest
+library(xgboost)      # Extreme Gradient Boosting
+library(catboost)     # CatBoost (perlu instalasi terpisah dari CRAN)
+library(pROC)         # ROC curve & AUC
+
+# ── Dummy Encoding & SHAP ──────────────────────────────────
+library(fastDummies)      # dummy_cols() untuk one-hot encoding cepat
+library(SHAPforxgboost)   # SHAP values & visualisasi untuk XGBoost
+```
+
+# Import Data
+
+```{r}
+PATH <- "D:/FREDITA MAGISTER/SEMESTER 2/PEMODELAN KLASIFIKASI/JURNAL PEMKLAS/2024 - KOR-20260422T084403Z-3-001/2024 - KOR/"
+
+korind1 <- read.dbf(
+  paste0(PATH, "ssn202403_kor_ind1.dbf"),
+  as.is = TRUE
+)
+
+korrt <- read.dbf(
+  paste0(PATH, "ssn202403_kor_rt.dbf"),
+  as.is = TRUE
+)
+
+cat("Dimensi korind1 :", dim(korind1), "\n")
+cat("Dimensi korrt   :", dim(korrt),   "\n")
+```
+
+# Merge Data
+
+## Penjelasan
+
+Proses merge dilakukan menggunakan variabel PSU, SSU, dan URUT karena
+ketiga variabel tersebut merupakan identitas rumah tangga pada data
+Susenas.
+
+Metode merge menggunakan `left_join()` agar seluruh observasi pada data
+individu tetap dipertahankan.
+
+```{r}
+korind1 <- korind1 %>%
+  mutate(across(c(R101, R102, R105, WI1, WI2, PSU, SSU, URUT), as.character))
+
+korrt <- korrt %>%
+  mutate(across(c(R101, R102, R105, WI1, WI2, PSU, SSU, URUT), as.character))
+
+data_full <- korind1 %>%
+  left_join(korrt, by = c("R101", "R102", "R105", "WI1", "WI2", "PSU", "SSU", "URUT"))
+
+cat("Jumlah observasi:", nrow(data_full), "\n")
+cat("Jumlah variabel:", ncol(data_full), "\n")
+```
+
+# Pembentukan Variabel Target
+
+## Penjelasan
+
+Variabel target dibentuk berdasarkan:
+
+-   R1207 = status merokok
+-   R1208 = jumlah batang rokok per minggu
+
+Mengacu pada WHO, responden dikategorikan sebagai perokok berat apabila
+mengonsumsi ≥ 140 batang rokok per minggu.
+
+```{r}
+krt_jambi <- data_full %>%
+  filter(
+    R403 == 1,
+    R101 == 15
+  ) %>%
+  mutate(
+    Y = case_when(
+      R1207 == 5 ~ 0,
+      R1207 == 2 ~ 0,
+      R1207 == 1 & R1208 < 140 ~ 0,
+      R1207 == 1 & R1208 >= 140 ~ 1,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  filter(!is.na(Y))
+
+table(krt_jambi$Y)
+dim(krt_jambi)
+```
+
+# Seleksi Variabel
+
+## Penjelasan
+
+Variabel prediktor dipilih berdasarkan teori perilaku merokok, kondisi
+sosial ekonomi, karakteristik rumah tangga, dan karakteristik hunian.
+
+```{r}
+df_clean <- krt_jambi %>%
+  dplyr::select(
+
+    Y,
+
+    umur_krt = R407,
+    jk_krt = R405,
+    status_kawin_krt = R404,
+    pendidikan_krt = R612,
+    lapangan_pekerjaan_krt = R706,
+    internet_krt = R812,
+    keluhan_kesehatan = R1102,
+
+    jumlah_art = R1801,
+    usaha_mikro = R2210AA,
+    bansos = R2207,
+
+    wilayah = R105,
+
+    status_bangunan = R1802,
+    luas_lantai = R1804,
+
+    jenis_lantai = R1808,
+    jenis_dinding = R1807,
+    jenis_atap = R1806A,
+
+    sumber_air = R1810A,
+    penerangan = R1816,
+    bahan_bakar = R1817,
+
+    motor = R2001H,
+    laptop = R2001F
+  )
+
+dim(df_clean)
+```
+
+```{r}
+library(DataExplorer)
+# Rontgen data: mengecek struktur dan missing values
+plot_intro(df_clean, ggtheme = theme_minimal())
+```
+
+# Cek Missing Value
+
+## Penjelasan
+
+Tahap ini dilakukan untuk mengetahui jumlah missing value pada setiap
+variabel sebelum proses cleaning dilakukan.
+
+Pada data survei seperti Susenas, missing value dapat muncul akibat
+non-response atau pertanyaan yang tidak relevan untuk responden
+tertentu.
+
+```{r}
+missing_table <- sapply(
+  df_clean,
+  function(x) sum(is.na(x))
+)
+
+missing_table
+```
+
+# Imputasi Missing Value
+
+## Penjelasan
+
+Penanganan missing value dilakukan menggunakan:
+
+-   imputasi median untuk variabel numerik,
+-   imputasi modus untuk variabel kategorik.
+
+Median dipilih karena lebih robust terhadap outlier dibanding mean.
+
+Pendekatan imputasi dipilih dibanding `drop_na()` agar jumlah observasi
+tidak banyak berkurang.
+
+```{r}
+# Variabel numerik
+num_cols <- c(
+  "umur_krt",
+  "jumlah_art",
+  "luas_lantai"
+)
+
+for(col in num_cols){
+
+  median_value <- median(
+    df_clean[[col]],
+    na.rm = TRUE
+  )
+
+  df_clean[[col]][is.na(df_clean[[col]])] <- median_value
+}
+
+# Fungsi modus
+mode_function <- function(x){
+
+  ux <- na.omit(unique(x))
+
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Variabel kategorik
+cat_cols <- names(df_clean)[!names(df_clean) %in% c(
+  "Y",
+  num_cols
+)]
+
+for(col in cat_cols){
+
+  mode_value <- mode_function(df_clean[[col]])
+
+  df_clean[[col]][is.na(df_clean[[col]])] <- mode_value
+}
+```
+
+# Encoding Variabel
+
+## Penjelasan
+
+Variabel kategorik dikonversi menjadi factor.
+
+Encoding target dibuat konsisten pada seluruh tahapan modeling:
+
+-   "Bukan Perokok Berat"
+-   "Perokok Berat"
+
+Encoding ini dipertahankan agar tidak terjadi mismatch level factor pada
+proses modeling dan evaluasi.
+
+```{r}
+df_clean <- df_clean %>%
+  mutate(
+    across(
+      -c(Y, umur_krt, jumlah_art, luas_lantai),
+      as.factor
+    ),
+    Y = factor(
+      Y,
+      levels = c(0,1),
+      labels = c(
+        "Bukan Perokok Berat",
+        "Perokok Berat"
+      )
+    )
+  )
+
+sapply(df_clean, function(x) sum(is.na(x)))
+```
+
+# Distribusi Variabel Target
+
+## Penjelasan
+
+Distribusi variabel target digunakan untuk mengidentifikasi kondisi
+imbalance data.
+
+```{r}
+freq_y <- df_clean %>%
+  count(Y) %>%
+  mutate(
+    pct = round(n/sum(n)*100,2)
+  )
+
+freq_y
+```
+
+```{r}
+ggplot(freq_y, aes(x = Y, y = n, fill = Y)) +
+
+  geom_bar(
+    stat = "identity",
+    width = 0.5,
+    show.legend = FALSE
+  ) +
+
+  geom_text(
+    aes(label = paste0(n, " (", pct, "%)")),
+    vjust = -0.5,
+    size = 4
+  ) +
+
+  scale_fill_manual(values = c(
+    "Bukan Perokok Berat" = "#2ecc71",
+    "Perokok Berat" = "#e74c3c"
+  )) +
+
+  labs(
+    title = "Distribusi Variabel Target",
+    subtitle = "Provinsi jambi, Susenas 2024",
+    x = "",
+    y = "Jumlah KRT"
+  ) +
+
+  theme_minimal()
+```
+
+```{r}
+# ==========================================
+# RECODE KODE R102 MENJADI NAMA KABUPATEN
+# ==========================================
+
+krt_jambi <- krt_jambi %>%
+  mutate(
+    kabupaten = case_when(
+      R102 == "1"  ~ "Kerinci",
+      R102 == "2"  ~ "Merangin",
+      R102 == "3"  ~ "Sarolangun",
+      R102 == "4"  ~ "Batanghari",
+      R102 == "5"  ~ "Muaro Jambi",
+      R102 == "6"  ~ "Tanjung Jabung Barat",
+      R102 == "7"  ~ "Tanjung Jabung Timur",
+      R102 == "8"  ~ "Bungo",
+      R102 == "9"  ~ "Tebo",
+      R102 == "71" ~ "Kota Jambi",
+      R102 == "72" ~ "Sungai Penuh",
+      TRUE ~ "Lainnya"
+    )
+  )
+
+# ==========================================
+# VISUALISASI DISTRIBUSI KABUPATEN/KOTA
+# ==========================================
+
+krt_jambi %>%
+  count(kabupaten) %>%
+  arrange(n) %>%
+  ggplot(aes(
+    x = reorder(kabupaten, n),
+    y = n
+  )) +
+
+  geom_col(
+    fill = "#3498db",
+    width = 0.7
+  ) +
+
+  geom_text(
+    aes(
+      label = format(
+        n,
+        big.mark = ".",
+        decimal.mark = ","
+      )
+    ),
+    hjust = -0.15,
+    size = 4
+  ) +
+
+  coord_flip() +
+
+  labs(
+    title = "Distribusi Kabupaten/Kota di Provinsi Jambi",
+    subtitle = "Data SUSENAS 2024",
+    x = "",
+    y = "Jumlah Observasi"
+  ) +
+
+  theme_minimal(base_size = 12) +
+
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold")
+  )
+```
+
+```{r}
+# ==========================================
+# RECODE KODE R102 MENJADI NAMA KABUPATEN
+# ==========================================
+
+krt_jambi <- krt_jambi %>%
+
+  mutate(
+
+    kabupaten = case_when(
+
+      R102 == "1"  ~ "Kerinci",
+      R102 == "2"  ~ "Merangin",
+      R102 == "3"  ~ "Sarolangun",
+      R102 == "4"  ~ "Batanghari",
+      R102 == "5"  ~ "Muaro Jambi",
+      R102 == "6"  ~ "Tanjung Jabung Barat",
+      R102 == "7"  ~ "Tanjung Jabung Timur",
+      R102 == "8"  ~ "Bungo",
+      R102 == "9"  ~ "Tebo",
+      R102 == "71" ~ "Kota Jambi",
+      R102 == "72" ~ "Kota Sungai Penuh",
+
+      TRUE ~ "Lainnya"
+    )
+  )
+
+# ==========================================
+# VISUALISASI PROPORSI PEROKOK BERAT
+# BERDASARKAN KABUPATEN/KOTA
+# ==========================================
+
+krt_jambi %>%
+
+  mutate(
+
+    Y = factor(
+      Y,
+      levels = c(0,1),
+      labels = c(
+        "Bukan Perokok Berat",
+        "Perokok Berat"
+      )
+    )
+
+  ) %>%
+
+  count(kabupaten, Y) %>%
+
+  group_by(kabupaten) %>%
+
+  mutate(
+    pct = round(n / sum(n) * 100, 1)
+  ) %>%
+
+  ggplot(aes(
+    x = reorder(kabupaten, pct),
+    y = pct,
+    fill = Y
+  )) +
+
+  geom_col(
+    position = "fill",
+    width = 0.75
+  ) +
+
+  # LABEL HORIZONTAL
+geom_text(
+
+  aes(
+    label = paste0(
+      pct,
+      "% | ",
+      n
+    )
+  ),
+
+  position = position_fill(vjust = 0.5),
+
+  size = 2.6,
+
+  color = "white",
+
+  fontface = "bold",
+
+  hjust = 0.55
+  
+  ) +
+
+  coord_flip() +
+
+  scale_fill_manual(values = c(
+    "Bukan Perokok Berat" = "#f1c40f",
+    "Perokok Berat" = "#1f3c88"
+  )) +
+
+  scale_y_continuous(labels = scales::percent) +
+
+  labs(
+    title = "Proporsi Perokok Berat Berdasarkan Kabupaten/Kota",
+    subtitle = "Data SUSENAS 2024 Provinsi Jambi",
+    x = "",
+    y = "Persentase",
+    fill = "Status"
+  ) +
+
+  theme_minimal(base_size = 12) +
+
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold"),
+    axis.text.y = element_text(face = "bold")
+  )
+```
+
+# Split Data
+
+## Penjelasan
+
+Data dibagi menjadi:
+
+-   80% data training
+-   20% data testing
+
+```{r}
+set.seed(123)
+
+idx_train <- createDataPartition(
+  df_clean$Y,
+  p = 0.8,
+  list = FALSE
+)
+
+train_raw <- df_clean[idx_train, ]
+test_data <- df_clean[-idx_train, ]
+
+dim(train_raw)
+dim(test_data)
+```
+
+# Penanganan Imbalanced Data
+
+## Penjelasan
+
+Penanganan imbalance dilakukan menggunakan ROSE.
+
+ROSE menghasilkan observasi sintetis sehingga distribusi kelas menjadi
+lebih seimbang.
+
+```{r}
+set.seed(123)
+
+train_rose <- ROSE(
+  Y ~ .,
+  data = train_raw,
+  N = nrow(train_raw),
+  p = 0.5,
+  seed = 123
+)$data
+
+train_rose$Y <- factor(train_rose$Y)
+test_data$Y <- factor(test_data$Y)
+
+table(train_rose$Y)
+```
+
+# Visualisasi Sebelum dan Sesudah ROSE
+
+```{r}
+rose_compare <- bind_rows(
+
+  train_raw %>%
+    count(Y) %>%
+    mutate(
+      Kondisi = "Sebelum ROSE",
+      pct = round(n/sum(n)*100,1)
+    ),
+
+  train_rose %>%
+    count(Y) %>%
+    mutate(
+      Kondisi = "Setelah ROSE",
+      pct = round(n/sum(n)*100,1)
+    )
+)
+
+ggplot(
+  rose_compare,
+  aes(x = Y, y = pct, fill = Kondisi)
+) +
+
+  geom_bar(
+    stat = "identity",
+    position = "dodge"
+  ) +
+
+  geom_text(
+    aes(label = paste0(pct,"%")),
+    position = position_dodge(0.9),
+    vjust = -0.4
+  ) +
+
+  scale_fill_manual(values = c(
+    "Sebelum ROSE" = "#e74c3c",
+    "Setelah ROSE" = "#2ecc71"
+  )) +
+
+  labs(
+    title = "Distribusi Sebelum dan Sesudah ROSE",
+    x = "Kelas",
+    y = "Persentase"
+  ) +
+
+  theme_minimal()
+```
+
+# Pemodelan Extra Trees
+
+## Penjelasan
+
+Extra Trees merupakan pengembangan dari Random Forest dengan randomisasi
+threshold split yang lebih tinggi.
+
+Threshold klasifikasi menggunakan 0.30 agar model lebih sensitif
+mendeteksi kelas minoritas.
+
+```{r}
+set.seed(123)
+
+model_et <- ranger(
+
+  Y ~ .,
+
+  data = train_rose,
+
+  classification = TRUE,
+
+  splitrule = "extratrees",
+
+  num.random.splits = 5,
+
+  num.trees = 500,
+
+  importance = "permutation",
+
+  probability = TRUE
+)
+
+prob_et <- predict(
+  model_et,
+  data = test_data
+)$predictions[, "Perokok Berat"]
+
+pred_et <- factor(
+  ifelse(
+    prob_et > 0.30,
+    "Perokok Berat",
+    "Bukan Perokok Berat"
+  ),
+  levels = c(
+    "Bukan Perokok Berat",
+    "Perokok Berat"
+  )
+)
+
+cm_et <- confusionMatrix(
+  pred_et,
+  test_data$Y,
+  positive = "Perokok Berat"
+)
+
+cm_et
+```
+
+# Pemodelan CatBoost
+
+## Penjelasan
+
+CatBoost dipilih karena mampu menangani data kategorik dengan baik dan
+relatif stabil pada data tabular.
+
+```{r}
+# CATBOOST
+# CatBoost membutuhkan target numerik:
+# 0 = Bukan Perokok Berat
+# 1 = Perokok Berat
+
+train_cb <- train_rose
+test_cb  <- test_data
+
+train_cb$Y <- ifelse(
+  train_cb$Y == "Perokok Berat",
+  1,
+  0
+)
+
+test_cb$Y <- ifelse(
+  test_cb$Y == "Perokok Berat",
+  1,
+  0
+)
+
+# LOAD POOL
+train_pool <- catboost.load_pool(
+  data = train_cb %>% select(-Y),
+  label = train_cb$Y
+)
+
+test_pool <- catboost.load_pool(
+  data = test_cb %>% select(-Y),
+  label = test_cb$Y
+)
+
+# TRAIN MODEL
+model_cb <- catboost.train(
+  train_pool,
+  params = list(
+    loss_function = "Logloss",
+    iterations = 300,
+    depth = 6,
+    learning_rate = 0.05,
+    logging_level = "Silent"
+  )
+)
+
+# PREDIKSI PROBABILITAS
+prob_cb <- catboost.predict(
+  model_cb,
+  test_pool,
+  prediction_type = "Probability"
+)
+
+# THRESHOLD
+pred_cb <- factor(
+
+  ifelse(
+    prob_cb > 0.30,
+    "Perokok Berat",
+    "Bukan Perokok Berat"
+  ),
+
+  levels = c(
+    "Bukan Perokok Berat",
+    "Perokok Berat"
+  )
+)
+
+# ACTUAL LABEL
+actual_cb <- factor(
+
+  ifelse(
+    test_cb$Y == 1,
+    "Perokok Berat",
+    "Bukan Perokok Berat"
+  ),
+
+  levels = c(
+    "Bukan Perokok Berat",
+    "Perokok Berat"
+  )
+)
+
+# CONFUSION MATRIX
+cm_cb <- confusionMatrix(
+  pred_cb,
+  actual_cb,
+  positive = "Perokok Berat"
+)
+
+cm_cb
+```
+
+# Perbandingan Model
+
+## Penjelasan
+
+Evaluasi model dilakukan menggunakan:
+
+-   Accuracy
+-   Sensitivity
+-   Specificity
+-   F1-score
+-   Balanced Accuracy
+-   Kappa
+
+Pada data imbalanced, balanced accuracy dan sensitivity menjadi metrik
+utama.
+
+```{r}
+hasil_model <- data.frame(
+
+  Model = c(
+    "Extra Trees",
+    "CatBoost"
+  ),
+
+  Accuracy = c(
+    cm_et$overall["Accuracy"],
+    cm_cb$overall["Accuracy"]
+  ),
+
+  Sensitivity = c(
+    cm_et$byClass["Sensitivity"],
+    cm_cb$byClass["Sensitivity"]
+  ),
+
+  Specificity = c(
+    cm_et$byClass["Specificity"],
+    cm_cb$byClass["Specificity"]
+  ),
+
+  F1 = c(
+    cm_et$byClass["F1"],
+    cm_cb$byClass["F1"]
+  ),
+
+  Balanced_Accuracy = c(
+    cm_et$byClass["Balanced Accuracy"],
+    cm_cb$byClass["Balanced Accuracy"]
+  ),
+
+  Kappa = c(
+    cm_et$overall["Kappa"],
+    cm_cb$overall["Kappa"]
+  )
+)
+
+knitr::kable(hasil_model)
+```
+
+# SHAP Extra Trees
+
+## Penjelasan
+
+SHAP digunakan untuk menjelaskan kontribusi masing-masing variabel
+terhadap prediksi model Extra Trees.
+
+Nilai SHAP positif menunjukkan variabel meningkatkan peluang seseorang
+terklasifikasi sebagai perokok berat.
+
+```{r}
+library(fastshap)
+library(shapviz)
+
+X_train <- train_rose %>%
+  dplyr::select(-Y)
+
+pred_wrapper <- function(object, newdata){
+
+  predict(
+    object,
+    data = newdata
+  )$predictions[, "Perokok Berat"]
+}
+
+set.seed(123)
+
+shap_values <- fastshap::explain(
+  object = model_et,
+  feature_names = names(X_train),
+  X = X_train,
+  pred_wrapper = pred_wrapper,
+  nsim = 50
+)
+
+sv <- shapviz(
+  shap_values,
+  X = X_train
+)
+
+sv_importance(sv)
+```
+
+# Kesimpulan
+
+Model machine learning berhasil digunakan untuk mengklasifikasikan rumah
+tangga dengan kategori perokok berat pada data Susenas Provinsi jambi.
+
+Model Extra Trees memberikan performa paling stabil berdasarkan balanced
+accuracy dan sensitivity dibandingkan CatBoost.
