@@ -30,7 +30,10 @@ Dokumen ini mendemonstrasikan **Model v3** dari klasifikasi Kepala Rumah Tangga 
 
 # 2. Persiapan & Preprocessing Data
 
-```{r setup_library}
+
+::: {.cell}
+
+```{.r .cell-code}
 library(foreign)     # Membaca file DBF
 library(dplyr)       # Manipulasi data
 library(tidyr)       # Perapihan data
@@ -40,29 +43,84 @@ library(ranger)      # Random Forest cepat
 library(xgboost)     # eXtreme Gradient Boosting
 library(pROC)        # Analisis Kurva ROC
 ```
+:::
+
 
 ## 2.1 Load Data Mentah DBF Jambi
 
 Kita membaca file DBF nasional langsung di dalam R dan memfilternya untuk Provinsi Jambi (`R101 == "15"`).
 
-```{r load_raw_data}
+
+::: {.cell}
+
+```{.r .cell-code}
 cat("Membaca file DBF Individu...\n")
+```
+
+::: {.cell-output .cell-output-stdout}
+
+```
+Membaca file DBF Individu...
+```
+
+
+:::
+
+```{.r .cell-code}
 ind_dbf <- read.dbf("data/ssn202403_kor_ind1.dbf", as.is = TRUE)
 jambi_ind <- ind_dbf %>% filter(R101 == "15")
 
 cat("Membaca file DBF Rumah Tangga...\n")
+```
+
+::: {.cell-output .cell-output-stdout}
+
+```
+Membaca file DBF Rumah Tangga...
+```
+
+
+:::
+
+```{.r .cell-code}
 rt_dbf <- read.dbf("data/ssn202403_kor_rt.dbf", as.is = TRUE)
 jambi_rt <- rt_dbf %>% filter(R101 == "15")
 
 cat("Dimensi awal Individu Jambi:", dim(jambi_ind)[1], "baris,", dim(jambi_ind)[2], "kolom.\n")
+```
+
+::: {.cell-output .cell-output-stdout}
+
+```
+Dimensi awal Individu Jambi: 23978 baris, 178 kolom.
+```
+
+
+:::
+
+```{.r .cell-code}
 cat("Dimensi awal Rumah Tangga Jambi:", dim(jambi_rt)[1], "baris,", dim(jambi_rt)[2], "kolom.\n")
 ```
+
+::: {.cell-output .cell-output-stdout}
+
+```
+Dimensi awal Rumah Tangga Jambi: 6954 baris, 188 kolom.
+```
+
+
+:::
+:::
+
 
 ## 2.2 Penyaringan KRT & Pembentukan Target (Y)
 
 Target `Y = 1` didefinisikan sebagai KRT (`R403 == "1"`) yang merokok sebulan terakhir (`R1207 == "1"`) dengan konsumsi $\ge 140$ batang seminggu (`R1208` $\ge 140$).
 
-```{r process_target}
+
+::: {.cell}
+
+```{.r .cell-code}
 jambi_krt <- jambi_ind %>%
   filter(R403 == "1") %>%
   mutate(
@@ -79,18 +137,37 @@ jambi_krt <- jambi_ind %>%
 cat("Jumlah KRT dengan status target valid:", nrow(jambi_krt), "\n")
 ```
 
+::: {.cell-output .cell-output-stdout}
+
+```
+Jumlah KRT dengan status target valid: 6922 
+```
+
+
+:::
+:::
+
+
 ## 2.3 Penggabungan Data (Merging)
 
-```{r merge_data}
+
+::: {.cell}
+
+```{.r .cell-code}
 join_keys <- c("R101", "R102", "R105", "WI1", "WI2", "PSU", "SSU", "URUT")
 df_merged <- left_join(jambi_krt, jambi_rt, by = join_keys)
 ```
+:::
+
 
 ## 2.4 Seleksi & Rekayasa Fitur
 
 Kita menyaring fitur yang relevan, terutama variabel baru hasil analisis korelasi (seperti `R1209` untuk riwayat merokok dan `R614` untuk ijazah tertinggi).
 
-```{r select_features}
+
+::: {.cell}
+
+```{.r .cell-code}
 to_num <- function(x) {
   suppressWarnings(as.numeric(ifelse(x %in% c("", "."), NA_character_, x)))
 }
@@ -153,10 +230,15 @@ df_features <- df_merged %>%
     jaminan_hari_tua, sumber_air_mandi
   )
 ```
+:::
+
 
 ## 2.5 Imputasi Missing Values & Pembersihan
 
-```{r imputation}
+
+::: {.cell}
+
+```{.r .cell-code}
 num_cols <- c("umur_krt", "jumlah_art", "luas_lantai", "jam_kerja_krt", "jam_kerja_utama_krt", "art_perempuan_kawin", "art_5_plus")
 cat_cols <- setdiff(names(df_features), c("Y", num_cols))
 
@@ -190,8 +272,22 @@ df_features$Y <- factor(df_features$Y, levels = c("0", "1"), labels = c("Bukan_P
 nzv <- nearZeroVar(df_features %>% select(-Y), saveMetrics = TRUE)
 nzv_cols <- rownames(nzv[nzv$nzv == TRUE, ])
 cat("Kolom near-zero variance yang dibuang:", paste(nzv_cols, collapse = ", "), "\n")
+```
+
+::: {.cell-output .cell-output-stdout}
+
+```
+Kolom near-zero variance yang dibuang: sumber_biaya 
+```
+
+
+:::
+
+```{.r .cell-code}
 df_clean <- df_features %>% select(-all_of(nzv_cols))
 ```
+:::
+
 
 ---
 
@@ -199,7 +295,10 @@ df_clean <- df_features %>% select(-all_of(nzv_cols))
 
 KRT dibagi menjadi Laki-laki (`jk_krt == 1`) dan Perempuan (`jk_krt == 2`). Model dilatih hanya pada Laki-laki.
 
-```{r split_data}
+
+::: {.cell}
+
+```{.r .cell-code}
 set.seed(123)
 idx_train <- createDataPartition(df_clean$Y, p = 0.8, list = FALSE)
 train_raw <- df_clean[idx_train, ]
@@ -213,8 +312,31 @@ test_male <- test_data %>% filter(jk_krt == "1")
 test_female <- test_data %>% filter(jk_krt == "2")
 
 cat("Jumlah KRT Laki-laki di Data Latih:", nrow(train_male), "\n")
+```
+
+::: {.cell-output .cell-output-stdout}
+
+```
+Jumlah KRT Laki-laki di Data Latih: 4833 
+```
+
+
+:::
+
+```{.r .cell-code}
 cat("Jumlah KRT Perempuan di Data Latih:", nrow(train_female), "\n")
 ```
+
+::: {.cell-output .cell-output-stdout}
+
+```
+Jumlah KRT Perempuan di Data Latih: 706 
+```
+
+
+:::
+:::
+
 
 ---
 
@@ -222,7 +344,10 @@ cat("Jumlah KRT Perempuan di Data Latih:", nrow(train_female), "\n")
 
 ## 4.1 Random Forest (ranger)
 
-```{r rf_model}
+
+::: {.cell}
+
+```{.r .cell-code}
 set.seed(123)
 # Train model pada Laki-laki saja
 model_rf_male <- ranger(
@@ -286,11 +411,25 @@ for (t in thresholds) {
 cat("Threshold RF Terbaik:", best_thresh_rf, "dengan Balanced Accuracy Train OOF:", best_bal_acc_rf, "\n")
 ```
 
+::: {.cell-output .cell-output-stdout}
+
+```
+Threshold RF Terbaik: 0.27 dengan Balanced Accuracy Train OOF: 0.7809968 
+```
+
+
+:::
+:::
+
+
 ## 4.2 XGBoost
 
 Kita lakukan Grid Search CV untuk hyperparameter tuning pada KRT Laki-laki.
 
-```{r xgb_model}
+
+::: {.cell}
+
+```{.r .cell-code}
 dummy_model_male <- dummyVars(~ ., data = train_male %>% select(-Y, -jk_krt))
 train_x_male <- predict(dummy_model_male, newdata = train_male %>% select(-Y, -jk_krt))
 test_x_male <- predict(dummy_model_male, newdata = test_male %>% select(-Y, -jk_krt))
@@ -366,11 +505,25 @@ for (t in thresholds) {
 cat("Threshold XGBoost Terbaik:", best_thresh_xgb, "dengan Balanced Accuracy Train OOF:", best_bal_acc_xgb, "\n")
 ```
 
+::: {.cell-output .cell-output-stdout}
+
+```
+Threshold XGBoost Terbaik: 0.28 dengan Balanced Accuracy Train OOF: 0.7870534 
+```
+
+
+:::
+:::
+
+
 ---
 
 # 5. Evaluasi & Perbandingan Performa pada Data Uji
 
-```{r evaluate_test}
+
+::: {.cell}
+
+```{.r .cell-code}
 # 5.1 Prediksi Test - Random Forest
 prob_rf_test_male <- predict(model_rf_male, data = test_male %>% select(-jk_krt))$predictions[, "Perokok_Berat"]
 prob_rf_test_all <- numeric(nrow(test_data))
@@ -403,13 +556,31 @@ eval_metrics <- data.frame(
 knitr::kable(eval_metrics, digits = 4, caption = "Perbandingan Metrik Evaluasi Model v3")
 ```
 
+::: {.cell-output-display}
+
+
+Table: Perbandingan Metrik Evaluasi Model v3
+
+|Model              | Accuracy| Balanced_Accuracy| Sensitivity| Specificity|
+|:------------------|--------:|-----------------:|-----------:|-----------:|
+|Random Forest (v3) |   0.7007|            0.7748|      0.9204|      0.6293|
+|XGBoost (v3)       |   0.6811|            0.7629|      0.9233|      0.6025|
+
+
+:::
+:::
+
+
 ---
 
 # 6. Analisis Hasil Visual
 
 ## 6.1 Confusion Matrix Plot
 
-```{r plot_confusion}
+
+::: {.cell}
+
+```{.r .cell-code}
 plot_confusion_matrix <- function(cm, title = "Confusion Matrix") {
   df_cm <- as.data.frame(cm$table)
   ggplot(df_cm, aes(x = Reference, y = Prediction, fill = Freq)) +
@@ -422,12 +593,28 @@ plot_confusion_matrix <- function(cm, title = "Confusion Matrix") {
 }
 
 plot_confusion_matrix(cm_rf, "Confusion Matrix - Random Forest v3")
+```
+
+::: {.cell-output-display}
+![](klasifikasi_perokok_jambi_v3_files/figure-html/plot_confusion-1.png){width=672}
+:::
+
+```{.r .cell-code}
 plot_confusion_matrix(cm_xgb, "Confusion Matrix - XGBoost v3")
 ```
 
+::: {.cell-output-display}
+![](klasifikasi_perokok_jambi_v3_files/figure-html/plot_confusion-2.png){width=672}
+:::
+:::
+
+
 ## 6.2 ROC Curve
 
-```{r plot_roc}
+
+::: {.cell}
+
+```{.r .cell-code}
 roc_rf <- roc(test_data$Y, prob_rf_test_all)
 roc_xgb <- roc(test_data$Y, prob_xgb_test_all)
 
@@ -438,9 +625,18 @@ legend("bottomright", legend = c(paste("Random Forest (AUC =", round(auc(roc_rf)
        col = c("#2980b9", "#e74c3c"), lwd = 3)
 ```
 
+::: {.cell-output-display}
+![](klasifikasi_perokok_jambi_v3_files/figure-html/plot_roc-1.png){width=672}
+:::
+:::
+
+
 ## 6.3 Feature Importance (Random Forest & XGBoost)
 
-```{r feature_importance_plots}
+
+::: {.cell}
+
+```{.r .cell-code}
 # RF Importance
 rf_imp <- data.frame(
   Feature = names(model_rf_male$variable.importance),
@@ -454,11 +650,23 @@ ggplot(head(rf_imp, 10), aes(x = reorder(Feature, Importance), y = Importance, f
   theme_minimal() +
   labs(title = "Top 10 Feature Importance (Random Forest)", x = "Fitur", y = "Skor Kepentingan") +
   theme(plot.title = element_text(face = "bold"))
+```
 
+::: {.cell-output-display}
+![](klasifikasi_perokok_jambi_v3_files/figure-html/feature_importance_plots-1.png){width=672}
+:::
+
+```{.r .cell-code}
 # XGBoost Importance
 importance_matrix <- xgb.importance(model = model_xgb_male)
 xgb.plot.importance(importance_matrix, top_n = 10, main = "Top 10 Feature Importance (XGBoost)")
 ```
+
+::: {.cell-output-display}
+![](klasifikasi_perokok_jambi_v3_files/figure-html/feature_importance_plots-2.png){width=672}
+:::
+:::
+
 
 ---
 
@@ -466,3 +674,4 @@ xgb.plot.importance(importance_matrix, top_n = 10, main = "Top 10 Feature Import
 
 1. **Efektivitas Variabel R1209**: Fitur ini memberikan peningkatan performa yang sangat signifikan.
 2. **Kesesuaian Target**: Kita akan memeriksa apakah metrik evaluasi akhir (Accuracy $\ge$ 85%, Balanced Accuracy $\ge$ 80%, Sensitivity $\ge$ 75%) berhasil dicapai pada model ini.
+
