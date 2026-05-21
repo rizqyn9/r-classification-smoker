@@ -1,0 +1,13 @@
+"Data_Method","Algorithm","Accuracy","Balanced_Accuracy","Sensitivity","Specificity"
+"Under-Sampling","Random Forest",66.96,73.03,84.96,61.11
+"Under-Sampling","ExtraTrees",66.88,74.68,89.97,59.39
+"Under-Sampling","XGBoost",66.09,71.16,81.12,61.21
+"Under-Sampling","CatBoost",66.09,74.65,91.45,57.85
+"Over-Sampling","Random Forest",69.34,66.85,61.95,71.74
+"Over-Sampling","ExtraTrees",68.4,71.7,78.17,65.23
+"Over-Sampling","XGBoost",68.84,69.7,71.39,68.01
+"Over-Sampling","CatBoost",68.04,74.35,86.73,61.97
+"ROSE","Random Forest",68.55,74.98,87.61,62.36
+"ROSE","ExtraTrees",67.32,75.07,90.27,59.87
+"ROSE","XGBoost",68.55,73.19,82.3,64.08
+"ROSE","CatBoost",68.11,74.5,87.02,61.97
