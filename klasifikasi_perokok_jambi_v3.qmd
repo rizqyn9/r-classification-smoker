@@ -464,5 +464,12 @@ xgb.plot.importance(importance_matrix, top_n = 10, main = "Top 10 Feature Import
 
 # 7. Kesimpulan & Diskusi
 
-1. **Efektivitas Variabel R1209**: Fitur ini memberikan peningkatan performa yang sangat signifikan.
-2. **Kesesuaian Target**: Kita akan memeriksa apakah metrik evaluasi akhir (Accuracy $\ge$ 85%, Balanced Accuracy $\ge$ 80%, Sensitivity $\ge$ 75%) berhasil dicapai pada model ini.
+1. **Efektivitas Variabel R1209 & Fitur Baru**: Penambahan fitur riwayat merokok dan ekonomi (AC, Septik) mendorong lonjakan drastis pada *Sensitivity* (mencapai $> 92\%$) dan *Balanced Accuracy* (mendekati $\approx 77.5\%$).
+2. **Kesesuaian Target & Performance Ceiling**: 
+   - ✅ **Sensitivity** ($\ge 75\%$): **Tercapai sangat baik (92%)**.
+   - ⚠️ **Balanced Accuracy** ($\ge 80\%$): **Hampir tercapai (77.48%)**, peningkatan masif dari model baseline ~68%.
+   - ❌ **Accuracy** ($\ge 85\%$): **Belum tercapai (70.07%)**. 
+   
+   **Alasan (Batas Matematis / Survei Noise):**
+   Mengingat mayoritas data adalah KRT Non-Perokok Berat ($\approx 75.5\%$), menekan Akurasi agar menyentuh 85% membutuhkan model untuk mengenali Non-Perokok dengan keakuratan minimal $\approx 88\%$ (Specificity). Karena banyaknya kemiripan profil sosial-ekonomi antara perokok berat dan non-perokok berat di data SUSENAS, memaksa Specificity ke $88\%$ akan meruntuhkan Sensitivity ke $\approx 52\%$.
+   Oleh karena itu, fungsi *Custom Threshold* kita mencari titik ekuilibrium terbaik yang menolak untuk mengorbankan Sensitivity di bawah $75\%$, sehingga Akurasi maksimal yang didapat secara empiris tertahan di angka $70\%$. 
