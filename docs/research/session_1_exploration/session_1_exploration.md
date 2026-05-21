@@ -34,6 +34,8 @@ Gender is a strong sociological predictor of smoking habits in Indonesia. Female
   - Test: 1,232 Males, 151 Females
 - **Logic**: Fit models (Random Forest / XGBoost) on male KRTs only. For females, assign a deterministic probability of `0.0001` (Bukan Perokok Berat).
 - **Optimization**: Find the probability threshold on out-of-fold (OOF) train predictions to maximize the overall balanced accuracy of the entire training set.
+- **Script**: [experiment_gender_split.R](experiment_gender_split.R)
+- **Output Logs**: [experiment_gender_split_output.txt](experiment_gender_split_output.txt)
 
 ### Results
 #### Random Forest (ranger)
@@ -95,6 +97,9 @@ To find why our models were hitting a ceiling, we calculated the correlation bet
 | 8 | **R705** | Apakah mempunyai pekerjaan, tetapi sementara tidak bekerja | **-0.133** |
 | 9 | **R105** | Wilayah (Perkotaan/Perdesaan) | **+0.119** |
 | 10 | **R614** | Apa ijazah/STTB tertinggi yang dimiliki | **-0.104** |
+
+- **Script**: [find_correlations.R](find_correlations.R)
+- **Output Logs**: [find_correlations_output.txt](find_correlations_output.txt)
 
 ### Breakthrough Finding: `R1209`
 - `R1209` ("Apakah dulu pernah merokok tembakau") has a Spearman correlation of **-0.467** with the target. 

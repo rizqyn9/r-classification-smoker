@@ -1,0 +1,98 @@
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+Loading required package: ggplot2
+Loading required package: lattice
+Warning message:
+package ‘ranger’ was built under R version 4.5.2 
+Warning message:
+package ‘xgboost’ was built under R version 4.5.2 
+Type 'citation("pROC")' for a citation.
+
+Attaching package: ‘pROC’
+
+The following objects are masked from ‘package:stats’:
+
+    cov, smooth, var
+
+=== Loading Raw DBF Data ===
+Filtering Jambi (R101 == 15)...
+Pre-processing IND details...
+Merging IND with RT...
+Feature Engineering...
+Imputing Missing Values...
+Applying Near-Zero Variance Filtering...
+Removing near-zero variance columns: vape_krt, bpjs_pbi, bpjs_non_pbi, no_insurance, penerangan, kredit_pinjol, kredit_coop 
+Train males count: 4833 , Train females count: 706 
+Test males count: 1232 , Test females count: 151 
+
+=== Training Random Forest (ranger) on Male KRTs ===
+Gender-Split RF Best Threshold: 0.27 with Overall Train Balanced Accuracy: 0.6758112 
+=== Gender-Split RF Test Set Performance ===
+Confusion Matrix and Statistics
+
+                     Reference
+Prediction            Bukan_Perokok_Berat Perokok_Berat
+  Bukan_Perokok_Berat                 634            76
+  Perokok_Berat                       410           263
+                                          
+               Accuracy : 0.6486          
+                 95% CI : (0.6228, 0.6738)
+    No Information Rate : 0.7549          
+    P-Value [Acc > NIR] : 1               
+                                          
+                  Kappa : 0.2875          
+                                          
+ Mcnemar's Test P-Value : <2e-16          
+                                          
+            Sensitivity : 0.7758          
+            Specificity : 0.6073          
+         Pos Pred Value : 0.3908          
+         Neg Pred Value : 0.8930          
+             Prevalence : 0.2451          
+         Detection Rate : 0.1902          
+   Detection Prevalence : 0.4866          
+      Balanced Accuracy : 0.6915          
+                                          
+       'Positive' Class : Perokok_Berat   
+                                          
+
+=== Training XGBoost on Male KRTs ===
+Male XGBoost scale_pos_weight: 2.569424 
+Gender-Split XGBoost Best Threshold: 0.42 with Overall Train Balanced Accuracy: 0.6750552 
+=== Gender-Split XGBoost Test Set Performance ===
+Confusion Matrix and Statistics
+
+                     Reference
+Prediction            Bukan_Perokok_Berat Perokok_Berat
+  Bukan_Perokok_Berat                 508            60
+  Perokok_Berat                       536           279
+                                          
+               Accuracy : 0.5691          
+                 95% CI : (0.5425, 0.5953)
+    No Information Rate : 0.7549          
+    P-Value [Acc > NIR] : 1               
+                                          
+                  Kappa : 0.21            
+                                          
+ Mcnemar's Test P-Value : <2e-16          
+                                          
+            Sensitivity : 0.8230          
+            Specificity : 0.4866          
+         Pos Pred Value : 0.3423          
+         Neg Pred Value : 0.8944          
+             Prevalence : 0.2451          
+         Detection Rate : 0.2017          
+   Detection Prevalence : 0.5893          
+      Balanced Accuracy : 0.6548          
+                                          
+       'Positive' Class : Perokok_Berat   
+                                          
