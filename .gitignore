@@ -24,9 +24,9 @@ klasifikasi_perokok_jambi.htmlcatboost_info/
 .positai
 
 # data
-data/raw
-data/processed
-data/output
+data/raw/*
+data/processed/*
+data/output/*
 
 # Mac
 .DS_Store
