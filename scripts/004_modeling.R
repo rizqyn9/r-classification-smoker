@@ -118,10 +118,10 @@ write.csv(summary_table, here("data", "processed", "model_performance_summary.cs
 # =========================
 # 5️⃣ Optional: ROC plots
 # =========================
-library(ggplot2)
-for(m in names(performance_list)){
-  for(mod in names(performance_list[[m]])){
-    res <- performance_list[[m]][[mod]]
-    plot(res$roc_obj, main=paste(mod, m))
-  }
-}
+# library(ggplot2)
+# for(m in names(performance_list)){
+#   for(mod in names(performance_list[[m]])){
+#     res <- performance_list[[m]][[mod]]
+#     plot(res$roc_obj, main=paste(mod, m))
+#   }
+# }
