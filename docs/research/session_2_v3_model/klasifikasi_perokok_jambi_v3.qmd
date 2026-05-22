@@ -39,6 +39,7 @@ library(caret)       # Machine Learning & Evaluasi
 library(ranger)      # Random Forest cepat
 library(xgboost)     # eXtreme Gradient Boosting
 library(pROC)        # Analisis Kurva ROC
+library(here)
 ```
 
 ## 2.1 Load Data Mentah DBF Jambi
@@ -47,17 +48,116 @@ Kita membaca file DBF nasional langsung di dalam R dan memfilternya untuk Provin
 
 ```{r load_raw_data}
 cat("Membaca file DBF Individu...\n")
-ind_dbf <- read.dbf("data/ssn202403_kor_ind1.dbf", as.is = TRUE)
+ind_dbf <- read.dbf(
+  here("data", "ssn202403_kor_ind1.dbf"), 
+  as.is = TRUE
+)
 jambi_ind <- ind_dbf %>% filter(R101 == "15")
 
 cat("Membaca file DBF Rumah Tangga...\n")
-rt_dbf <- read.dbf("data/ssn202403_kor_rt.dbf", as.is = TRUE)
+rt_dbf <- read.dbf(here("data","ssn202403_kor_rt.dbf"), as.is = TRUE)
 jambi_rt <- rt_dbf %>% filter(R101 == "15")
 
 cat("Dimensi awal Individu Jambi:", dim(jambi_ind)[1], "baris,", dim(jambi_ind)[2], "kolom.\n")
 cat("Dimensi awal Rumah Tangga Jambi:", dim(jambi_rt)[1], "baris,", dim(jambi_rt)[2], "kolom.\n")
 ```
+``` {r sampling}
+library(dplyr)
 
+set.seed(123)
+
+# Ambil 500 baris saja, atau jumlah lebih kecil sesuai kebutuhan
+jambi_ind_sample <- jambi_ind %>% sample_n(min(500, nrow(jambi_ind)))
+jambi_rt_sample  <- jambi_rt %>% sample_n(min(500, nrow(jambi_rt)))
+
+# Lihat beberapa baris
+head(jambi_ind_sample)
+head(jambi_rt_sample)
+
+# Simpan ke CSV
+write.csv(jambi_ind_sample, "jambi_ind_sample.csv", row.names = FALSE)
+write.csv(jambi_rt_sample, "jambi_rt_sample.csv", row.names = FALSE)
+```
+``` {r summarize}
+# Load library
+library(dplyr)
+library(readr)
+
+# -------------------------
+# Fungsi untuk ringkasan dataset
+# -------------------------
+summarize_dataset <- function(df) {
+  summary_list <- lapply(names(df), function(col_name) {
+    col_data <- df[[col_name]]
+    n_missing <- sum(is.na(col_data))
+    n_unique  <- length(unique(col_data))
+    col_type  <- class(col_data)
+    
+    if(is.numeric(col_data)) {
+      stats <- c(
+        mean = mean(col_data, na.rm = TRUE),
+        median = median(col_data, na.rm = TRUE),
+        min = min(col_data, na.rm = TRUE),
+        max = max(col_data, na.rm = TRUE),
+        sd = sd(col_data, na.rm = TRUE)
+      )
+    } else if(is.factor(col_data) || is.character(col_data)) {
+      stats <- table(col_data)
+    } else {
+      stats <- NA
+    }
+    
+    list(
+      column = col_name,
+      type = col_type,
+      n_missing = n_missing,
+      n_unique = n_unique,
+      stats = stats
+    )
+  })
+  return(summary_list)
+}
+
+# -------------------------
+# Load sample CSV
+# -------------------------
+ind_sample <- read_csv("jambi_ind_sample.csv")
+rt_sample  <- read_csv("./jambi_rt_sample.csv")
+
+# -------------------------
+# Generate summary
+# -------------------------
+ind_summary <- summarize_dataset(ind_sample)
+rt_summary  <- summarize_dataset(rt_sample)
+
+# -------------------------
+# Simpan ringkasan ke file RDS / CSV
+# -------------------------
+saveRDS(ind_summary, file = "jambi_ind_summary.rds")
+saveRDS(rt_summary, file = "jambi_rt_summary.rds")
+
+# Optional: bisa juga tulis ringkasan sederhana ke CSV
+# Hanya menampilkan tipe data, missing, unik
+# ind_summary_df <- data.frame(
+#   column = sapply(ind_summary, `[[`, "column"),
+#   type = sapply(ind_summary, `[[`, "type"),
+#   n_missing = sapply(ind_summary, `[[`, "n_missing"),
+#   n_unique = sapply(ind_summary, `[[`, "n_unique")
+# )
+write_csv(ind_summary_df, "jambi_ind_summary.csv")
+
+rt_summary_df <- data.frame(
+  column = sapply(rt_summary, `[[`, "column"),
+  type = sapply(rt_summary, `[[`, "type"),
+  n_missing = sapply(rt_summary, `[[`, "n_missing"),
+  n_unique = sapply(rt_summary, `[[`, "n_unique")
+)
+write_csv(rt_summary_df, "jambi_rt_summary.csv")
+
+# -------------------------
+# End of Script
+# -------------------------
+```
 ## 2.2 Penyaringan KRT & Pembentukan Target (Y)
 
 Target `Y = 1` didefinisikan sebagai KRT (`R403 == "1"`) yang merokok sebulan terakhir (`R1207 == "1"`) dengan konsumsi $\ge 140$ batang seminggu (`R1208` $\ge 140$).

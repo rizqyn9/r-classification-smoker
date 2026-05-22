@@ -16,11 +16,14 @@ execute:
   warning: false
   message: false
   echo: true
+editor: 
+  markdown: 
+    wrap: sentence
 ---
 
 # 1. Pendahuluan
 
-Dokumen ini mendemonstrasikan perbaikan pipeline Machine Learning di mana seluruh tahapan penggabungan data, pembersihan (*data cleaning*), penyaringan (*filtering*), seleksi fitur, dan imputasi *missing values* dilakukan sepenuhnya menggunakan R (**Tidyverse**). 
+Dokumen ini mendemonstrasikan perbaikan pipeline Machine Learning di mana seluruh tahapan penggabungan data, pembersihan (*data cleaning*), penyaringan (*filtering*), seleksi fitur, dan imputasi *missing values* dilakukan sepenuhnya menggunakan R (**Tidyverse**).
 
 Tahapan ekstraksi data biner Susenas tingkat nasional (`.dbf`) menjadi CSV regional Jambi tetap dipertahankan menggunakan Python untuk alasan efisiensi memori, sedangkan pemrosesan tingkat lanjut dari data mentah Jambi hingga pemodelan kini disatukan secara elegan dalam satu file Quarto ini.
 
@@ -40,7 +43,8 @@ library(pROC)        # Analisis Kurva ROC
 
 ## 2.1 Load Data Mentah Jambi
 
-Kita membaca file hasil ekstraksi Jambi yang masih berupa representasi mentah dari DBF Susenas. Untuk menjaga akurasi tipe data (seperti kode kategorikal berawalan nol), kita membaca seluruh kolom sebagai string/character terlebih dahulu.
+Kita membaca file hasil ekstraksi Jambi yang masih berupa representasi mentah dari DBF Susenas.
+Untuk menjaga akurasi tipe data (seperti kode kategorikal berawalan nol), kita membaca seluruh kolom sebagai string/character terlebih dahulu.
 
 ```{r load_raw_data}
 # Membaca data mentah tingkat individu dan rumah tangga Provinsi Jambi
@@ -53,8 +57,8 @@ cat("Dimensi awal Rumah Tangga Jambi:", dim(raw_rt)[1], "baris,", dim(raw_rt)[2]
 
 ## 2.2 Penyaringan KRT & Pembentukan Variabel Target (Y)
 
-Sesuai metodologi, analisis difokuskan hanya pada **Kepala Rumah Tangga (KRT)** (`R403 == 1`). Kita juga menyusun variabel target `Y` (Perokok Berat) berdasarkan kriteria WHO:
-- `Y = 1` (Perokok Berat): Jika status merokok sebulan terakhir (`R1207`) adalah "Ya" (`"1"`) **dan** konsumsi rokok seminggu terakhir (`R1208`) adalah $\ge 140$ batang.
+Sesuai metodologi, analisis difokuskan hanya pada **Kepala Rumah Tangga (KRT)** (`R403 == 1`).
+Kita juga menyusun variabel target `Y` (Perokok Berat) berdasarkan kriteria WHO: - `Y = 1` (Perokok Berat): Jika status merokok sebulan terakhir (`R1207`) adalah "Ya" (`"1"`) **dan** konsumsi rokok seminggu terakhir (`R1208`) adalah $\ge 140$ batang.
 - `Y = 0` (Bukan Perokok Berat): Jika status merokok adalah "Tidak" (`"5"`) atau "Berhenti" (`"2"`), atau jika jumlah konsumsi mingguan $< 140$ batang.
 - Responden dengan status merokok yang kosong/invalid dihapus dari analisis.
 
@@ -124,8 +128,7 @@ df_features <- df_merged %>%
 
 ## 2.5 Penanganan Missing Values & Imputasi
 
-Kita mengidentifikasi missing values berupa string kosong `""`, tanda titik `"."`, atau `NA` untuk diimputasi:
-- **Variabel Numerik**: Diisi dengan nilai **Median**.
+Kita mengidentifikasi missing values berupa string kosong `""`, tanda titik `"."`, atau `NA` untuk diimputasi: - **Variabel Numerik**: Diisi dengan nilai **Median**.
 - **Variabel Kategorikal**: Diisi dengan nilai **Modus** (frekuensi terbanyak).
 
 ```{r imputation}
@@ -202,7 +205,8 @@ ggplot(df, aes(x = Y, fill = Y)) +
 
 # 3. Data Splitting & Penanganan Imbalance
 
-Kita membagi data menjadi set *Training* (80%) dan *Testing* (20%). Karena kelas tidak seimbang, kita terapkan metode **ROSE (Random Over-Sampling Examples)** pada data latih agar algoritma Machine Learning tidak bias terhadap kelas mayoritas.
+Kita membagi data menjadi set *Training* (80%) dan *Testing* (20%).
+Karena kelas tidak seimbang, kita terapkan metode **ROSE (Random Over-Sampling Examples)** pada data latih agar algoritma Machine Learning tidak bias terhadap kelas mayoritas.
 
 ```{r splitting_data}
 set.seed(123)
@@ -223,7 +227,8 @@ Kita akan melatih dua model algoritma unggulan untuk data tabular: **Random Fore
 
 ## 4.1 Random Forest (Ranger)
 
-Kita menggunakan `ranger` yang sangat cepat. Penyesuaian `probability = TRUE` memungkinkan kita memanipulasi *threshold* klasifikasi.
+Kita menggunakan `ranger` yang sangat cepat.
+Penyesuaian `probability = TRUE` memungkinkan kita memanipulasi *threshold* klasifikasi.
 
 ```{r train_rf}
 set.seed(123)
@@ -245,7 +250,8 @@ pred_rf <- factor(ifelse(prob_rf > 0.40, "Perokok_Berat", "Bukan_Perokok_Berat")
 
 ## 4.2 XGBoost
 
-XGBoost adalah algoritma *Gradient Boosting* yang sangat tangguh. Kita perlu mengonversi data ke format matriks (DMatrix).
+XGBoost adalah algoritma *Gradient Boosting* yang sangat tangguh.
+Kita perlu mengonversi data ke format matriks (DMatrix).
 
 ```{r train_xgb}
 # Konversi fitur kategorik ke one-hot encoding
@@ -311,7 +317,10 @@ xgb.plot.importance(importance_matrix, top_n = 10, main = "Top 10 Fitur Paling B
 ```
 
 # 7. Kesimpulan & Perbandingan
-Dengan memindahkan preprocessing sepenuhnya ke R menggunakan `dplyr` dan `tidyverse`:
-1. Kode program menjadi lebih kohesif karena semua data preparation (cleaning, merging, imputasi) berada dalam satu workspace yang sama dengan pelatihan model.
-2. Pengujian dan audit data prep dapat dilakukan secara interaktif menggunakan Quarto.
-3. Performa evaluasi yang didapatkan identik dengan versi prep Python, membuktikan kesetaraan logika preprocessing di kedua bahasa pemrograman.
+
+Dengan memindahkan preprocessing sepenuhnya ke R menggunakan `dplyr` dan `tidyverse`: 1.
+Kode program menjadi lebih kohesif karena semua data preparation (cleaning, merging, imputasi) berada dalam satu workspace yang sama dengan pelatihan model.
+2.
+Pengujian dan audit data prep dapat dilakukan secara interaktif menggunakan Quarto.
+3.
+Performa evaluasi yang didapatkan identik dengan versi prep Python, membuktikan kesetaraan logika preprocessing di kedua bahasa pemrograman.

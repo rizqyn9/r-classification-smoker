@@ -30,9 +30,9 @@ Berdasarkan ekstraksi data mikro Susenas Maret 2024 tingkat individu untuk KRT d
 
 Untuk memastikan model benar-benar sensitif mendeteksi kelompok perokok berat (kelas minoritas), metrik evaluasi diperluas sebagai berikut:
 
-- **Sensitivity / Recall**: **$\ge$ 75%** (meminimalkan risiko *false negative* pada perokok berat).
-- **Balanced Accuracy**: **$\ge$ 80%** (metrik utama penyeimbang kelas).
-- **Akurasi Minimum**: **$\ge$ 85%**.
+- **Sensitivity / Recall**: **75%** (meminimalkan risiko *false negative* pada perokok berat).
+- **Balanced Accuracy**: **80%** (metrik utama penyeimbang kelas).
+- **Akurasi Minimum**: **85%**.
 
 > [!WARNING]
 > **Performance Ceiling (Model v3)**: Secara empiris pada data Susenas perilaku merokok yang penuh *noise* sosiodemografi, terdapat batas kemampuan prediksi. Menekan Akurasi agar mencapai 85% akan mendongkrak Specificity secara masif namun menjatuhkan Sensitivity menjadi $\approx 52\%$ (gagal memenuhi target deteksi). Oleh karena itu, pada iterasi **Model v3**, kompromi yang paling optimal berhasil mencapai Sensitivity **> 92%** dan Balanced Accuracy **~77.5%**, menjaga deteksi perokok berat agar tetap sangat tinggi meskipun Akurasi keseluruhan tertahan di kisaran 70%.
