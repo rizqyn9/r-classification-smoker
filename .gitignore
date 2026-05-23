@@ -22,6 +22,7 @@
 # temp
 klasifikasi_perokok_jambi.htmlcatboost_info/
 .positai
+outputs/*
 
 # data
 data/raw/*
