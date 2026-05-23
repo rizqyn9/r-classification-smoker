@@ -27,6 +27,7 @@ klasifikasi_perokok_jambi.htmlcatboost_info/
 data/raw/*
 data/processed/*
 data/output/*
+data/interim/*
 
 # Mac
 .DS_Store

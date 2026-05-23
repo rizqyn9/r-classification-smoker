@@ -46,7 +46,7 @@ params <- list(
   objective = "binary:logistic",
   max_depth = 8,
   eta = 0.01,
-  scale_pos_weight = 8.0 
+  scale_pos_weight =1.2
 )
 
 model_final <- xgb.train(params = params, data = dtrain, nrounds = 500, verbose = 0)
