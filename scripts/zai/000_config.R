@@ -38,4 +38,25 @@ TARGET_ACCURACY <- 0.85 # Akurasi minimum
 # Reproducibility
 SEED <- 202403
 
+# Feature Dictionary (Single Source of Truth)
+COL_TARGET <- "Y"
+
+FEATURES_NUMERIC <- c(
+  "umur_krt", "jumlah_art", "luas_lantai", "jam_kerja_krt",
+  "art_perempuan_kawin", "art_5_plus", "wealth_index", "housing_index"
+)
+
+FEATURES_CATEGORICAL <- c(
+  "jk_krt", "pernah_merokok", "status_kawin", 
+  "pekerjaan_kategori", "pendidikan_tinggi"
+)
+
+ALL_FEATURES <- c(COL_TARGET, FEATURES_NUMERIC, FEATURES_CATEGORICAL)
+
+# Parameter Split & Balancing
+SPLIT_RATIO <- 0.7
+NUM_COLS <- FEATURES_NUMERIC # Num cols mengacu pada dictionary
+CAT_COLS <- FEATURES_CATEGORICAL # Cat cols mengacu pada dictionary
+BALANCING_METHODS <- c("ROSE", "SMOTE", "None")
+
 cat("Config loaded")

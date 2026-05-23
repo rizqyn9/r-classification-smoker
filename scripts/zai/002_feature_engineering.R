@@ -1,5 +1,5 @@
 # ==============================================================================
-# 002_feature_engineering.R - Target Definition dan Feature Engineering
+# 002_feature_engineering.R - Target Definition dan Dynamic Feature Engineering
 # ==============================================================================
 
 source(here("scripts", "zai", "000_config.R"))
@@ -9,23 +9,15 @@ library(dplyr)
 # Load data merged
 df_merged <- readRDS(file.path(PATH_PROCESSED, FILE_PROC_MERGED))
 
-# Fungsi konversi ke numerik
+# Fungsi bantu konversi ke numerik
 to_num <- function(x) suppressWarnings(as.numeric(ifelse(x %in% c("", "."), NA_character_, x)))
-
-# Fungsi bantu Modus untuk imputasi kategorikal
-get_mode <- function(x) {
-  x_clean <- na.omit(x)
-  if (length(x_clean) == 0) return("Unknown")
-  ux <- unique(x_clean)
-  ux[which.max(tabulate(match(x_clean, ux)))]
-}
 
 # Filter dan Target Definition
 df_features <- df_merged %>%
   filter(R101 == PROV_CODE_JAMBI, R403 == KRT_CODE, R1207 %in% SMOKER_CODES) %>%
   mutate(
     r1208_num = to_num(R1208),
-    Y = if_else(R1207 %in% SMOKER_CODES & !is.na(r1208_num) & r1208_num >= HEAVY_SMOKER_THRESHOLD, 1, 0)
+    !!COL_TARGET := if_else(R1207 %in% SMOKER_CODES & !is.na(r1208_num) & r1208_num >= HEAVY_SMOKER_THRESHOLD, 1, 0)
   ) %>%
   # Feature Engineering
   mutate(
@@ -59,24 +51,8 @@ df_features <- df_merged %>%
       (R1808 %in% c("1", "2", "3", "4", "5", "6", "7")) + 
       (R1809D %in% c("1", "2", "3"))
   ) %>%
-  # Pilih hanya kolom yang dibutuhkan (Anti-Leakage otomatis)
-  select(Y, umur_krt, jumlah_art, luas_lantai, jam_kerja_krt, art_perempuan_kawin, 
-         art_5_plus, jk_krt, pernah_merokok, status_kawin, wealth_index, 
-         pekerjaan_kategori, pendidikan_tinggi, housing_index)
+  # Dynamic select berdasarkan Feature Dictionary di Config
+  select(all_of(ALL_FEATURES))
 
-# Imputasi Numerik (Median)
-num_cols <- c("umur_krt", "jumlah_art", "luas_lantai", "jam_kerja_krt",
-              "art_perempuan_kawin", "art_5_plus", "wealth_index", "housing_index")
-
-df_features <- df_features %>%
-  mutate(across(all_of(num_cols), ~ if_else(is.na(.), median(., na.rm = TRUE), .)))
-
-# Imputasi Kategorikal (Mode) & Konversi ke Factor
-cat_cols <- c("jk_krt", "pernah_merokok", "pekerjaan_kategori", "pendidikan_tinggi", "status_kawin")
-
-df_features <- df_features %>%
-  mutate(across(all_of(cat_cols), ~ if_else(is.na(.), get_mode(.), .))) %>%
-  mutate(across(all_of(cat_cols), as.factor))
-
-# Simpan hasil
+# Simpan hasil 
 saveRDS(df_features, file.path(PATH_PROCESSED, FILE_PROC_FEATURES))
