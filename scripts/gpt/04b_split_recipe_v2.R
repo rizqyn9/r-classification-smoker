@@ -14,7 +14,7 @@ set.seed(SEED)
 # ==============================================================================
 
 df <- readRDS(
-  file.path(PATH_PROCESSED, "krt_features_v2.rds")
+  file.path(PATH_PROCESSED, "krt_features_refined.rds")
 )
 
 # ==============================================================================

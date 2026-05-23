@@ -13,8 +13,12 @@ set.seed(SEED)
 # LOAD
 # ==============================================================================
 
+# df <- readRDS(
+#   file.path(PATH_PROCESSED, FILE_FEATURES)
+# )
+
 df <- readRDS(
-  file.path(PATH_PROCESSED, FILE_FEATURES)
+  file.path(PATH_PROCESSED, "krt_features_refined.rds")
 )
 
 # ==============================================================================
