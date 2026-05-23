@@ -137,11 +137,14 @@ ind2 <- ind %>%
       )
   )
 
+non_krt <- ind2 %>%
+  filter(R403 != "1")
+
 # ==============================================================================
 # HOUSEHOLD AGGREGATION
 # ==============================================================================
 
-hh_behavior <- ind2 %>%
+hh_behavior <- non_krt %>%
   group_by(across(all_of(hh_keys))) %>%
   summarise(
     
@@ -152,8 +155,8 @@ hh_behavior <- ind2 %>%
     smoker_count_household =
       sum(smoker, na.rm = TRUE),
     
-    heavy_smoker_count =
-      sum(heavy_ind_smoker, na.rm = TRUE),
+    # heavy_smoker_count =
+    #   sum(heavy_ind_smoker, na.rm = TRUE),
     
     smoker_ratio_household =
       mean(smoker, na.rm = TRUE),
@@ -161,11 +164,11 @@ hh_behavior <- ind2 %>%
     spouse_smoker =
       max(spouse_smoker, na.rm = TRUE),
     
-    avg_cigarette_household =
-      mean(cigarette, na.rm = TRUE),
+    # avg_cigarette_household =
+    #   mean(cigarette, na.rm = TRUE),
     
-    max_cigarette_household =
-      max(cigarette, na.rm = TRUE),
+    # max_cigarette_household =
+    #   max(cigarette, na.rm = TRUE),
     
     # ----------------------------------------------------------
     # Dependency Structure
@@ -264,9 +267,9 @@ enhanced_df <- enhanced_df %>%
         poverty_stress_score
       ),
     
-    smoking_peer_pressure =
-      smoker_ratio_household *
-      smoker_count_household,
+    # smoking_peer_pressure =
+    #   smoker_ratio_household *
+    #   smoker_count_household,
     
     poverty_housing_interaction =
       poverty_stress_score /
