@@ -56,3 +56,27 @@ df_features <- df_merged %>%
 
 # Simpan hasil 
 saveRDS(df_features, file.path(PATH_PROCESSED, FILE_PROC_FEATURES))
+
+library(ggplot2)
+library(tidyr)
+
+# Visualisasi 1: Distribusi Target (Imbalance Check)
+p2_target <- df_features %>%
+  ggplot(aes(x = factor(Y))) +
+  geom_bar(fill = "darkred") +
+  labs(title = "Target Distribution (Before Balancing)", x = "Heavy Smoker (Y=1)", y = "Count") +
+  theme_minimal()
+
+ggsave(file.path(PATH_OUTPUTS, "002_target_distribution.png"), p2_target, width = 6, height = 4)
+
+# Visualisasi 2: Distribusi Wealth & Housing Index
+p2_indices <- df_features %>%
+  select(wealth_index, housing_index) %>%
+  pivot_longer(everything(), names_to = "index_type", values_to = "score") %>%
+  ggplot(aes(x = score)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  facet_wrap(~index_type) +
+  labs(title = "Distribution of Engineered Indices", x = "Score", y = "Count") +
+  theme_minimal()
+
+ggsave(file.path(PATH_OUTPUTS, "002_indices_distribution.png"), p2_indices, width = 8, height = 4)
