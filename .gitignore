@@ -23,6 +23,7 @@
 klasifikasi_perokok_jambi.htmlcatboost_info/
 .positai
 outputs/*
+models/*
 
 # data
 data/raw/*
