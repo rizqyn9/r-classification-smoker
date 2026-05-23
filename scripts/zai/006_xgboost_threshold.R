@@ -159,3 +159,61 @@ print(head(importance, 10))
 # Save Artifacts
 saveRDS(model_xgb, file.path(PATH_MODELS, FILE_MODEL_XGB))
 write.csv(threshold_results, file.path(PATH_OUTPUTS, FILE_THRESHOLDS), row.names = FALSE)
+
+# ==============================================================================
+# VISUALISASI TRADE-OFF & REKOMENDASI BUSINESS
+# ==============================================================================
+
+library(ggplot2)
+library(tidyr)
+
+if(!dir.exists(PATH_OUTPUTS)) dir.create(PATH_OUTPUTS, recursive = TRUE)
+
+# 1. Reshape data untuk visualisasi
+plot_df <- threshold_results %>%
+  pivot_longer(cols = c(Accuracy, Sensitivity, Balanced_Accuracy), 
+               names_to = "Metric", 
+               values_to = "Value")
+
+# 2. Plot Trade-Off
+p_tradeoff <- plot_df %>%
+  ggplot(aes(x = Threshold, y = Value, color = Metric)) +
+  geom_line(size = 1.1) +
+  # Tambahkan garis target
+  geom_hline(yintercept = TARGET_SENSITIVITY, linetype = "dashed", color = "darkred", alpha = 0.5) +
+  geom_hline(yintercept = TARGET_BAL_ACCURACY, linetype = "dashed", color = "darkblue", alpha = 0.5) +
+  geom_hline(yintercept = TARGET_ACCURACY, linetype = "dashed", color = "darkgreen", alpha = 0.5) +
+  annotate("text", x = 0.15, y = TARGET_SENSITIVITY + 0.02, label = "Target Sens (75%)", color = "darkred", size = 3) +
+  annotate("text", x = 0.15, y = TARGET_BAL_ACCURACY + 0.02, label = "Target Bal.Acc (80%)", color = "darkblue", size = 3) +
+  annotate("text", x = 0.15, y = TARGET_ACCURACY + 0.02, label = "Target Acc (85%)", color = "darkgreen", size = 3) +
+  scale_color_manual(values = c("Accuracy" = "green4", "Sensitivity" = "red3", "Balanced_Accuracy" = "blue3")) +
+  labs(title = "Trade-Off: Sensitivity vs Accuracy vs Balanced Accuracy",
+       subtitle = "Menunjukkan mustahilnya memenuhi semua target secara bersamaan",
+       x = "Threshold Probabilitas", y = "Nilai Metrik") +
+  theme_minimal()
+
+ggsave(file.path(PATH_OUTPUTS, "006_metric_tradeoff.png"), p_tradeoff, width = 10, height = 6)
+
+# 3. Rekomendasi Threshold Berdasarkan Prioritas
+cat("\n==========================================================\n")
+cat("📊 REKOMENDASI THRESHOLD BERDASARKAN PRIORITAS BISNIS\n")
+cat("==========================================================\n")
+
+# Prioritas 1: Tetap menjaga Sensitivity >= 75%, Accuracy setinggi mungkin
+recom_sens <- threshold_results %>%
+  filter(Sensitivity >= TARGET_SENSITIVITY) %>%
+  arrange(desc(Accuracy)) %>% slice(1)
+
+cat("\n🛡️ Opsi 1 (Prioritas Tangkap Perokok Berat): Sensitivity >= 75%\n")
+cat("Threshold:", recom_sens$Threshold, "| Acc:", round(recom_sens$Accuracy, 2), 
+    "| Sens:", round(recom_sens$Sensitivity, 2), "| Bal.Acc:", round(recom_sens$Balanced_Accuracy, 2), "\n")
+
+# Prioritas 2: Accuracy & Balanced Accuracy setinggi mungkin (Sensitivity dikorbankan)
+recom_acc <- threshold_results %>%
+  arrange(desc(Balanced_Accuracy)) %>% slice(1)
+
+cat("\n⚖️ Opsi 2 (Prioritas Akurasi Keseluruhan): Balanced Accuracy Maksimal\n")
+cat("Threshold:", recom_acc$Threshold, "| Acc:", round(recom_acc$Accuracy, 2), 
+    "| Sens:", round(recom_acc$Sensitivity, 2), "| Bal.Acc:", round(recom_acc$Balanced_Accuracy, 2), "\n")
+
+cat("\n💡 Kesimpulan: Fitur Susenas (Demografi/Ekonomi) memiliki keterbatasan untuk mencapai target awal. Perlu pertimbangan relaksasi target atau penambahan fitur eksternal.\n")
