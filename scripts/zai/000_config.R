@@ -59,4 +59,8 @@ NUM_COLS <- FEATURES_NUMERIC # Num cols mengacu pada dictionary
 CAT_COLS <- FEATURES_CATEGORICAL # Cat cols mengacu pada dictionary
 BALANCING_METHODS <- c("ROSE", "SMOTE", "None")
 
+# File Outputs Data Split
+FILE_PROC_TEST <- "test.rds"
+PREFIX_TRAIN_BALANCED <- "train_balanced_"
+
 cat("Config loaded")
