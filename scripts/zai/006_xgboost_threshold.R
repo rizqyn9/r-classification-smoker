@@ -21,9 +21,8 @@ XGB_NROUNDS <- 100
 FILE_MODEL_XGB <- "xgboost_native_model.rds"
 FILE_THRESHOLDS <- "xgboost_native_thresholds.csv"
 
-
 # ==============================================================================
-# 006_xgboost_native.R - Native XGBoost Pipeline (FIXED Double OHE)
+# 006_xgboost_native.R - Native XGBoost Pipeline (Aligned with 003 updates)
 # ==============================================================================
 
 source(here("scripts", "zai", "000_config.R"))
@@ -54,6 +53,7 @@ sanitize_for_xgb <- function(df) {
     names()
   
   df <- df %>% select(all_of(COL_TARGET), all_of(keep_cols))
+  # Pastikan level faktor tetap konsisten
   df[[COL_TARGET]] <- factor(df[[COL_TARGET]], levels = c(LEVEL_NEG, LEVEL_POS))
   return(df)
 }
@@ -67,24 +67,17 @@ align_test_columns <- function(test_df, predictor_cols) {
   test_df %>% select(all_of(predictor_cols))
 }
 
-# Load Data (Train sudah OHE di script 003, Test belum)
-train_data <- readRDS(file.path(PATH_PROCESSED, paste0("train_balanced_", SELECTED_BALANCING_METHOD, ".rds")))
-test_data  <- readRDS(file.path(PATH_PROCESSED, "test.rds"))
-
-levels(train_data[[COL_TARGET]]) <- c(LEVEL_NEG, LEVEL_POS)
-levels(test_data[[COL_TARGET]])  <- c(LEVEL_NEG, LEVEL_POS)
+# Load Data (Train sudah OHE dan Y sudah No/Yes dari script 003)
+train_data <- readRDS(file.path(PATH_PROCESSED, paste0(PREFIX_TRAIN_BALANCED, SELECTED_BALANCING_METHOD, ".rds")))
+test_data  <- readRDS(file.path(PATH_PROCESSED, FILE_PROC_TEST))
 
 # One Hot Encoding HANYA untuk Test Data
 test_encoded <- test_data %>%
   fastDummies::dummy_cols(select_columns = CAT_COLS, remove_first_dummy = TRUE, remove_selected_columns = TRUE) %>%
   rename_with(make.names)
 
-# Rename Train Data columns (untuk konsistensi make.names, meskipun sudah OHE)
-train_encoded <- train_data %>%
-  rename_with(make.names)
-
 # Sanitize Train
-train_clean <- sanitize_for_xgb(train_encoded)
+train_clean <- sanitize_for_xgb(train_data)
 predictor_cols <- setdiff(names(train_clean), COL_TARGET)
 
 # Sanitize & Align Test
