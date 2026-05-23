@@ -188,6 +188,72 @@ for (w in weights_to_try) {
 }
 
 # ==============================================================================
+# THRESHOLD SEARCH
+# ==============================================================================
+
+thresholds <- seq(0.05, 0.50, by = 0.01)
+
+threshold_results <- purrr::map_dfr(
+  thresholds,
+  function(th) {
+    
+    pred_class <- ifelse(
+      preds$.pred_Yes >= th,
+      LEVEL_POS,
+      LEVEL_NEG
+    )
+    
+    pred_class <- factor(
+      pred_class,
+      levels = c(LEVEL_NEG, LEVEL_POS)
+    )
+    
+    eval_df <- tibble(
+      truth = preds$heavy_smoker,
+      pred = pred_class
+    )
+    
+    tibble(
+      threshold = th,
+      
+      sensitivity = sensitivity(
+        eval_df,
+        truth = truth,
+        estimate = pred,
+        event_level = "second"
+      )$.estimate,
+      
+      specificity = specificity(
+        eval_df,
+        truth = truth,
+        estimate = pred,
+        event_level = "second"
+      )$.estimate,
+      
+      bal_accuracy = bal_accuracy(
+        eval_df,
+        truth = truth,
+        estimate = pred,
+        event_level = "second"
+      )$.estimate,
+      
+      accuracy = accuracy(
+        eval_df,
+        truth = truth,
+        estimate = pred
+      )$.estimate
+    )
+  }
+)
+
+best_thresh <- threshold_results %>%
+  arrange(desc(bal_accuracy)) %>%
+  slice(1)
+
+cat("\nBEST THRESHOLD\n")
+print(best_thresh)
+
+# ==============================================================================
 # STOP PARALLEL
 # ==============================================================================
 
