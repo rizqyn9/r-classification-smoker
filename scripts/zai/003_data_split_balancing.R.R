@@ -82,3 +82,22 @@ saveRDS(train_smote, file.path(PATH_PROCESSED, "train_balanced_SMOTE.rds"))
 
 # Simpan Test Set
 saveRDS(test_data, file.path(PATH_PROCESSED, "test.rds"))
+
+library(ggplot2)
+
+# Gabungkan semua data train untuk perbandingan visual
+plot_data <- bind_rows(
+  train_none %>% mutate(Method = "None"),
+  train_rose %>% mutate(Method = "ROSE"),
+  train_smote %>% mutate(Method = "SMOTE")
+) %>% select(all_of(COL_TARGET), Method)
+
+# Visualisasi: Perbandingan Hasil Balancing
+p3_balance <- plot_data %>%
+  ggplot(aes(x = factor(!!sym(COL_TARGET)), fill = Method)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Target Distribution Across Balancing Methods", x = "Heavy Smoker (Y=1)", y = "Count") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+
+ggsave(file.path(PATH_OUTPUTS, "003_balancing_comparison.png"), p3_balance, width = 8, height = 5)
