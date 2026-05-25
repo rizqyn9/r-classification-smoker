@@ -27,6 +27,7 @@ data/raw/*
 data/shared/*
 data/smoker/*
 data/extreme_poverty/*
+data/extreme_poverty_national/*
 
 # Mac
 .DS_Store
