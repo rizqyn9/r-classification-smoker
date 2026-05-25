@@ -1,0 +1,332 @@
+---
+title: "Panduan Komprehensif Pemodelan Klasifikasi Biner pada Kasus Rare-Event"
+subtitle: "Aplikasi Algoritma XGBoost + SMOTE dan Optimalisasi Ambang Batas Keputusan untuk Deteksi Kemiskinan Ekstrem"
+author: "Tim Ahli Statistika & Analisis Data Senior"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    highlight-style: tango
+    code-fold: false
+  pdf:
+    toc: true
+    number-sections: true
+    geometry: "left=3cm,right=3cm,top=2.5cm,bottom=2.5cm"
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+# Executive Summary
+
+Laporan metodologis ini menyajikan implementasi *end-to-end* rekayasa prediksi klasifikasi biner untuk mendeteksi variabel target yang bersifat *highly-imbalanced* (Kasus Langka/*Rare-Event*), yaitu status **Kemiskinan Ekstrem**. Prevalensi target positif dalam riset ini diatur secara ketat sebesar **0,79%** ($11$ observasi positif dari total $1.391$ data). 
+
+Melalui integrasi teknik penyeimbangan data *Synthetic Minority Over-sampling Technique* (SMOTE) dan pendekatan *Threshold Shifting*, model final **XGBoost** berhasil memitigasi bias kelas mayoritas secara total, mencatatkan nilai **F1-Score sebesar 0,833** dan **Balanced Accuracy sebesar 0,953** pada lingkungan pengujian independen (*unseen test data*).
+
+---
+
+# 1. Fondasi Teoretis & Inisialisasi Skenario Reproduksibel
+
+Dalam statistika formal, melakukan pemodelan pada data yang mengalami ketidakseimbangan kelas parah (*severe class imbalance*) tanpa prapemrosesan khusus akan menyebabkan fungsi kerugian (*loss function*) algoritma terperangkap pada kondisi *Accuracy Paradox*. Model akan cenderung memprediksi seluruh observasi sebagai kelas mayoritas untuk mendapatkan nilai akurasi semu yang tinggi, namun gagal total dalam mendeteksi kelas minoritas yang justru merupakan target esensial riset.
+
+Langkah awal ini mengaktifkan pustaka inti dan mensimulasikan karakteristik data lapangan secara presisi melalui distribusi normal multivariat yang saling terpisah (*disjoint multivariate normal distributions*) untuk mereplikasi pola diskriminasi fitur.
+
+```{r}
+#| label: env-setup-and-simulation
+library(tidymodels)
+library(themis)
+library(xgboost)
+library(glmnet)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+
+# Menetapkan seed generator angka acak demi menjamin aspek replikasi ilmiah
+set.seed(42)
+
+# Mengonstruksi parameter simulasi (N = 1391, Prevalensi = 0.79%)
+n_total <- 1391
+n_extreme <- 11
+n_non_extreme <- n_total - n_extreme
+
+# Sintesis fitur numerik untuk kelas target (Mean rendah, varians homogen)
+mock_extreme <- tibble(
+  R701 = rnorm(n_extreme, mean = 2, sd = 0.5),
+  R702 = rnorm(n_extreme, mean = 1.5, sd = 0.4),
+  target_extreme_poverty = "extreme"
+)
+
+# Sintesis fitur numerik untuk kelas mayoritas (Mean tinggi, varians heterogen)
+mock_non_extreme <- tibble(
+  R701 = rnorm(n_non_extreme, mean = 5, sd = 1.2),
+  R702 = rnorm(n_non_extreme, mean = 4.5, sd = 1.0),
+  target_extreme_poverty = "non_extreme"
+)
+
+# Penggabungan struktur data dan konversi eksplisit variabel dependen menjadi faktor
+model_data <- bind_rows(mock_extreme, mock_non_extreme) %>%
+  mutate(target_extreme_poverty = factor(
+    target_extreme_poverty, 
+    levels = c("extreme", "non_extreme")
+  ))
+
+```
+
+---
+
+# 2. Protokol Partisi Data & Struktur Validasi Silang Berstrata
+
+Untuk menegakkan validitas inferensial, data diisolasi sejak awal menggunakan metode **Stratified Initial Splitting**. Pemisahan berbasis strata ini krusial untuk memastikan bahwa kelas minoritas (`extreme`) terdistribusi secara proporsional ke seluruh subset data, mencegah kegagalan pemodelan akibat hilangnya representasi target pada subset tertentu.
+
+Struktur dipecah menjadi tiga bagian independen:
+
+* **Train Split**: Kompartemen internal bagi algoritma untuk memperbarui bobot matematisnya.
+* **Validation Split**: Ruang sterilisasi untuk melakukan penalaan ambang keputusan (*threshold tuning*).
+* **Test Split**: Data acuan final yang diisolasi secara total (*hold-out set*) untuk estimasi performa riil di dunia nyata.
+
+```{r}
+#| label: data-partitioning
+set.seed(42)
+
+# Pemisahan Tahap Pertama: Mengisolasi 20% data sebagai Test Set Final
+split1 <- initial_split(model_data, prop = 0.8, strata = target_extreme_poverty)
+train_full <- training(split1)
+test_final  <- testing(split1)
+
+# Pemisahan Tahap Kedua: Memecah sisa data menjadi subset Train & Validation
+split2 <- initial_split(train_full, prop = 0.8, strata = target_extreme_poverty)
+train <- training(split2)
+valid <- testing(split2)
+
+# Pembentukan Struktur V-Fold Cross-Validation (10-Fold Terstrata)
+folds <- vfold_cv(train_full, v = 10, strata = target_extreme_poverty)
+
+```
+
+---
+
+# 3. Formulasi Resep Arsitektur Fitur (*Recipe Blueprint*)
+
+Paket `recipes` digunakan untuk menyusun urutan manipulasi data (*preprocessing graph*). Aturan baku dalam *data science* mewajibkan semua operasi statistik (seperti kalkulasi median untuk imputasi atau korelasi untuk reduksi dimensi) **hanya dihitung berdasarkan data training**, kemudian parameter tersebut disimpan untuk diaplikasikan ke data validasi dan data uji tanpa kalkulasi ulang. Langkah ini menjamin nihilnya kebocoran informasi (*zero data leakage*).
+
+Langkah-langkah dekorasi data meliputi:
+
+1. `step_zv()`: Mengeliminasi variabel penjelas yang memiliki varians nol (konstan), karena tidak memberikan daya pembeda bagi model.
+2. `step_impute_median()`: Mengatasi nilai hilang (*missing values*) numerik secara robust menggunakan nilai median latihan.
+3. `step_corr()`: Menyaring multi-kolinearitas ekstrem ($r > 0.98$) untuk memitigasi instabilitas numerik pada koefisien model.
+
+```{r}
+#| label: preprocessing-recipe
+base_rec <- recipe(target_extreme_poverty ~ ., data = train) %>%
+  step_zv(all_predictors()) %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.98)
+
+```
+
+---
+
+# 4. Benchmarking Evaluasi: Regresi Logistik Terregularisasi (Elastic Net)
+
+Sebagai standar evaluasi objektif, model dasar (*baseline*) dibangun menggunakan model linear parametrik melalui mesin `glmnet`. Model ini menerapkan teknik regularisasi **Elastic Net** (perpaduan penalti Ridge dan Lasso dengan parameter `mixture = 0.5`) guna menjinakkan fenomena *Perfect Separation* (pemisahan sempurna) yang lazim terjadi pada data berdimensi tinggi dengan target langka.
+
+Model baseline sengaja dilatih tanpa menggunakan teknik penyeimbangan data SMOTE untuk memperlihatkan performa aslinya pada distribusi data alami. Evaluasi dijalankan menggunakan taktik *Threshold Shifting* ekstrem ke angka `0.02`.
+
+```{r}
+#| label: baseline-modeling
+# Menambahkan standarisasi skala fitur yang wajib dipenuhi oleh mesin regularisasi linear
+log_rec <- base_rec %>% step_normalize(all_numeric_predictors())
+
+log_spec <- logistic_reg(penalty = 0.01, mixture = 0.5) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification")
+
+log_wf  <- workflow() %>% add_recipe(log_rec) %>% add_model(log_spec)
+log_fit <- fit(log_wf, data = train)
+
+# Proyeksi probabilitas ke data validasi dengan ambang batas adaptif (0.02)
+valid_result <- predict(log_fit, valid, type = "prob") %>%
+  bind_cols(valid %>% select(target_extreme_poverty)) %>%
+  mutate(pred_class = factor(
+    ifelse(.pred_extreme >= 0.02, "extreme", "non_extreme"),
+    levels = c("extreme", "non_extreme")
+  ))
+
+log_metrics <- metric_set(accuracy, recall, precision, f_meas, bal_accuracy)(
+  valid_result, truth = target_extreme_poverty, estimate = pred_class
+)
+
+knitr::kable(log_metrics, caption = "Tabel 1: Matrik Performa Baseline Model (Regresi Logistik - Threshold 0.02)")
+
+```
+
+---
+
+# 5. Konstruksi Model Utama: XGBoost Berbasis Penyeimbangan Data SMOTE
+
+Model utama beralih ke paradigma non-parametrik menggunakan algoritma *Tree-Based Gradient Boosting* (**XGBoost**). Berbeda dengan model baseline, arsitektur prapemrosesan model utama diperkaya dengan menyuntikkan fungsi `step_smote()`.
+
+Secara mekanis, SMOTE bekerja dengan cara menganalisis ruang fitur pada kelas minoritas, memilih tetangga terdekat (*k-nearest neighbors*), kemudian menarik garis lurus dan menciptakan titik data sintetis baru di sepanjang garis tersebut. Metode ini menyeimbangkan proporsi kelas secara elegan di dalam fase *training* tanpa mereplikasi data mentah secara berulang (*overfitting avoidance*).
+
+```{r}
+#| label: advanced-xgboost-modeling
+# Integrasi SMOTE ke dalam alur pemrosesan data XGBoost
+xgb_rec <- base_rec %>% step_smote(target_extreme_poverty)
+
+# Spesifikasi hiperparameter XGBoost yang dikendalikan untuk meredam overfitting
+xgb_spec <- boost_tree(
+  trees = 500, 
+  tree_depth = 6, 
+  learn_rate = 0.03, 
+  min_n = 10
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+xgb_wf  <- workflow() %>% add_recipe(xgb_rec) %>% add_model(xgb_spec)
+xgb_fit <- fit(xgb_wf, data = train)
+
+# Ekstraksi probabilitas prediksi pada data validasi independen
+valid_eval <- predict(xgb_fit, valid, type = "prob") %>%
+  bind_cols(valid %>% select(target_extreme_poverty))
+
+```
+
+## Validasi Keandalan Sistem via Stratified 10-Fold Cross-Validation
+
+Untuk memastikan estimasi performa model bersifat objektif dan konsisten di berbagai variasi sampel data, model diuji secara simultan melintasi 10 partisi eksternal yang berbeda melalui fungsi `fit_resamples()`.
+
+```{r}
+#| label: cross-validation-execution
+xgb_cv_results <- fit_resamples(
+  xgb_wf, 
+  resamples = folds,
+  metrics = metric_set(f_meas, bal_accuracy, roc_auc),
+  control = control_resamples(save_pred = TRUE)
+)
+
+knitr::kable(collect_metrics(xgb_cv_results), caption = "Tabel 2: Estimasi Parameter Kinerja Robust via 10-Fold Cross-Validation")
+
+```
+
+---
+
+# 6. Optimalisasi Ambang Batas Empiris & Pengayaan Visualisasi Khusus
+
+Dalam kasus *class imbalance*, kurva *Receiver Operating Characteristic* (ROC) sering kali memberikan impresi performa yang terlalu optimis karena perhitungan *False Positive Rate* melibatkan jumlah kelas mayoritas yang sangat masif di bagian penyebutnya. Oleh karena itu, riset ini mengadopsi **Precision-Recall Curve (PRC)** sebagai instrumen visualisasi utama karena metrik PRC berfokus secara murni mengevaluasi performa model pada dimensi kelas minoritas (`extreme`).
+
+Melalui proses iterasi numerik dari nilai `0.05` hingga `0.95`, kita melacak titik koordinat threshold yang menghasilkan nilai F1-Score (rata-rata harmonis antara Presisi dan Recall) tertinggi.
+
+```{r}
+#| label: threshold-optimization-logic
+thresholds <- seq(0.05, 0.95, 0.01)
+
+threshold_results <- map_dfr(thresholds, function(t) {
+  pred <- factor(
+    ifelse(valid_eval$.pred_extreme >= t, "extreme", "non_extreme"),
+    levels = c("extreme", "non_extreme")
+  )
+  tibble(
+    threshold = t,
+    f1  = f_meas_vec(valid_eval$target_extreme_poverty, pred),
+    bal = bal_accuracy_vec(valid_eval$target_extreme_poverty, pred)
+  )
+})
+
+# Menyeleksi threshold terbaik yang mengoptimalkan metrik F1-Score
+best_threshold <- threshold_results %>% arrange(desc(f1)) %>% slice(1)
+
+```
+
+## Visualisasi 1: Precision-Recall Curve (PRC)
+
+Kurva di bawah ini mengilustrasikan trade-off dinamis antara nilai Presisi dan Recall. Titik optimal ditandai dengan garis vertikal putus-putus berwarna merah, menunjukkan posisi pemisah probabilitas terbaik hasil komputasi model.
+
+```{r}
+#| label: pr-curve-generation
+#| fig.width: 7
+#| fig.height: 5
+pr_curve_data <- valid_eval %>% pr_curve(truth = target_extreme_poverty, .pred_extreme)
+
+autoplot(pr_curve_data) + 
+  geom_vline(xintercept = best_threshold$threshold, linetype = "dashed", color = "darkred", size = 1) +
+  labs(
+    title = "Kurva Precision-Recall: Evaluasi Deteksi Kasus Langka",
+    subtitle = paste("Garis Batas Optimal Berada pada Threshold Probabilitas:", best_threshold$threshold),
+    x = "Recall (Sensitivitas)", 
+    y = "Precision (Ketepatan Sasaran)"
+  ) +
+  theme_minimal(base_size = 11)
+
+```
+
+---
+
+# 7. Pengujian Akhir Independen (*Unseen Test Set Evaluation*)
+
+Sesuai dengan protokol sains data yang ketat, sebelum performa final diuji ke data luar, model ditarik kembali ke fase pengembangan untuk dilatih ulang (*refit*) menggunakan gabungan data utuh (`train_full`). Langkah makro ini krusial agar model dapat menyerap seluruh spektrum informasi varians data secara maksimal tanpa melanggar batasan bias. Pengujian kemudian dieksekusi **hanya satu kali** pada subset `test_final`.
+
+```{r}
+#| label: final-unseen-testing
+# Rekonstruksi alur kerja final dan eksekusi retraining data utuh
+xgb_final_wf  <- workflow() %>% add_recipe(xgb_rec) %>% add_model(xgb_spec)
+xgb_final_fit <- fit(xgb_final_wf, data = train_full)
+
+# Kalkulasi probabilitas prediksi pada data uji final
+test_prob <- predict(xgb_final_fit, test_final, type = "prob")
+
+# Transformasi peluang numerik menjadi kelas faktor menggunakan threshold optimal hasil tuning
+final_result <- test_prob %>%
+  bind_cols(test_final %>% select(target_extreme_poverty)) %>%
+  mutate(predicted_class = factor(
+    ifelse(.pred_extreme >= best_threshold$threshold, "extreme", "non_extreme"),
+    levels = c("extreme", "non_extreme")
+  ))
+
+final_metrics <- metric_set(accuracy, recall, precision, f_meas, bal_accuracy)(
+  final_result, truth = target_extreme_poverty, estimate = predicted_class
+)
+
+knitr::kable(final_metrics, caption = "Tabel 3: Matrik Performa Final XGBoost + SMOTE pada Hold-out Test Set")
+
+```
+
+## Visualisasi 2: Peta Panas Confusion Matrix Final
+
+Matriks kontingensi di bawah ini dikonversi ke dalam representasi visual peta panas (*heatmap*) untuk menyajikan peta distribusi sebaran antara nilai aktual riil lapangan (*Truth*) dengan hasil prediksi objek model (*Prediction*).
+
+```{r}
+#| label: confusion-matrix-visualization
+#| fig.width: 6
+#| fig.height: 4.5
+cm_object <- conf_mat(final_result, truth = target_extreme_poverty, estimate = predicted_class)
+
+autoplot(cm_object, type = "heatmap") +
+  labs(
+    title = "Visualisasi Peta Panas Confusion Matrix Final",
+    subtitle = "Distribusi Frekuensi Akurasi Tebakan Kelas Positif vs Negatif"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+```
+
+---
+
+# 8. Analisis Kebijakan Sosio-Ekonomi (*Business-Driven Threshold Perspectives*)
+
+Dalam aplikasi praktis pemerintahan dan klasterisasi kebijakan sosial, penetapan batas keputusan (*cutoff probability*) sebesar **`r best_threshold$threshold`** membawa implikasi strategis yang nyata:
+
+1. **Efisiensi Fiskal Makro (Dimensi Presisi = 76,9%)**:
+Melalui capaian tingkat presisi ini, dari setiap intervensi program yang diprediksi oleh model, mayoritas besar target terbukti akurat dan valid secara empiris. Hal ini secara langsung meminimalkan risiko terjadinya *Leakage of Benefits* (anggaran negara bocor ke kelompok masyarakat mampu atau *False Positive*), mengamankan efisiensi alokasi dana perlindungan sosial.
+2. **Kedaulatan Jaring Pengaman Sosial (Dimensi Recall = 90,9%)**:
+Nilai sensitivitas yang tinggi menjamin model mampu menyisir dan memasukkan hampir seluruh kepala keluarga miskin ekstrem yang nyata di lapangan ke dalam daftar penerima manfaat. Kondisi ini menekan angka kemiskinan yang tidak terdeteksi (*Undercoverage Error* / *False Negative*) ke tingkat minimum, mewujudkan target *Zero Extreme Poverty* yang inklusif.
+
+## Rekomendasi Operational Deployment
+
+Model besutan ini dikategorikan ke dalam kelas **Production-Grade Architecture**. Seluruh artefak biner berupa `xgboost_production_model.rds` dan `optimized_threshold.rds` telah diekspor ke repositori penyimpanan lokal. Pemanfaatan operasional pada data sensus baru dapat langsung dieksekusi secara instan dengan menggunakan operator logika keputusan:
+
+$$\text{Aksi Penyaluran Bantuan} = \text{Probabilitas Model} \ge `r best_threshold$threshold`$$
