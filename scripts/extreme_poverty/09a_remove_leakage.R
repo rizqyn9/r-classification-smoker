@@ -1,10 +1,11 @@
 # ==============================================================================
 # 09a_remove_leakage.R
-# Remove Leakage Variables
+# Remove Leakage and Proxy Variables
 # ==============================================================================
 
 library(here)
 library(dplyr)
+library(tibble)
 
 source(
   here(
@@ -16,17 +17,17 @@ source(
 
 # LOAD DATA
 
-train_selected <- readRDS(
+train_feature_selected <- readRDS(
   file.path(
     PATH_PROCESSED,
-    "train_selected.rds"
+    "train_feature_selected.rds"
   )
 )
 
-test_selected <- readRDS(
+test_feature_selected <- readRDS(
   file.path(
     PATH_PROCESSED,
-    "test_selected.rds"
+    "test_feature_selected.rds"
   )
 )
 
@@ -37,36 +38,61 @@ leakage_vars <- c(
   # SOCIAL ASSISTANCE
   grep(
     "^R22",
-    names(train_selected),
+    names(train_feature_selected),
     value = TRUE
   ),
   
   # ECONOMIC QUANTILE
   grep(
     "^KUINTIL",
-    names(train_selected),
+    names(train_feature_selected),
     value = TRUE
   ),
   
   # DISTRIBUTION
   grep(
     "^DISTRI",
-    names(train_selected),
+    names(train_feature_selected),
     value = TRUE
   ),
   
   # SAMPLE WEIGHT
-  "FWT"
+  "FWT",
+  
+  # EXTREME HOUSING PROXY
+  grep(
+    "^R1808",
+    names(train_feature_selected),
+    value = TRUE
+  ),
+  
+  grep(
+    "^R1809",
+    names(train_feature_selected),
+    value = TRUE
+  ),
+  
+  grep(
+    "^R1817",
+    names(train_feature_selected),
+    value = TRUE
+  )
+)
+
+# UNIQUE VARIABLES
+
+leakage_vars <- unique(
+  leakage_vars
 )
 
 # REMOVE LEAKAGE
 
-train_selected <- train_selected %>%
+train_model_ready <- train_feature_selected %>%
   select(
     -any_of(leakage_vars)
   )
 
-test_selected <- test_selected %>%
+test_model_ready <- test_feature_selected %>%
   select(
     -any_of(leakage_vars)
   )
@@ -74,18 +100,18 @@ test_selected <- test_selected %>%
 # SAVE OUTPUT
 
 saveRDS(
-  train_selected,
+  train_model_ready,
   file.path(
     PATH_PROCESSED,
-    "train_model.rds"
+    "train_model_ready.rds"
   )
 )
 
 saveRDS(
-  test_selected,
+  test_model_ready,
   file.path(
     PATH_PROCESSED,
-    "test_model.rds"
+    "test_model_ready.rds"
   )
 )
 
@@ -98,7 +124,7 @@ leakage_summary <- tibble(
   ),
   value = c(
     length(leakage_vars),
-    ncol(train_selected)
+    ncol(train_model_ready)
   )
 )
 

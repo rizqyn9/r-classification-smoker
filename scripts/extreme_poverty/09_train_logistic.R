@@ -6,6 +6,7 @@
 library(here)
 library(dplyr)
 library(tidymodels)
+library(tibble)
 
 source(
   here(
@@ -17,30 +18,30 @@ source(
 
 # LOAD DATA
 
-train_selected <- readRDS(
+train_model_ready <- readRDS(
   file.path(
     PATH_PROCESSED,
-    "train_selected.rds"
+    "train_model_ready.rds"
   )
 )
 
-test_selected <- readRDS(
+test_model_ready <- readRDS(
   file.path(
     PATH_PROCESSED,
-    "test_selected.rds"
+    "test_model_ready.rds"
   )
 )
 
 # CONVERT TARGET
 
-train_selected <- train_selected %>%
+train_model_ready <- train_model_ready %>%
   mutate(
     target_extreme_poverty = factor(
       target_extreme_poverty
     )
   )
 
-test_selected <- test_selected %>%
+test_model_ready <- test_model_ready %>%
   mutate(
     target_extreme_poverty = factor(
       target_extreme_poverty
@@ -62,14 +63,14 @@ log_spec <- logistic_reg() %>%
 log_fit <- fit(
   log_spec,
   target_extreme_poverty ~ .,
-  data = train_selected
+  data = train_model_ready
 )
 
 # PREDICT PROBABILITY
 
-test_pred <- predict(
+test_prob <- predict(
   log_fit,
-  test_selected,
+  test_model_ready,
   type = "prob"
 )
 
@@ -77,27 +78,22 @@ test_pred <- predict(
 
 test_class <- predict(
   log_fit,
-  test_selected,
+  test_model_ready,
   type = "class"
 )
 
 # COMBINE RESULT
 
 result <- bind_cols(
-  test_selected %>%
-    select(target_extreme_poverty),
-  test_pred,
+  
+  test_model_ready %>%
+    select(
+      target_extreme_poverty
+    ),
+  
+  test_prob,
+  
   test_class
-)
-
-# METRICS
-
-metric_summary <- metric_set(
-  accuracy,
-  recall,
-  precision,
-  f_meas,
-  bal_accuracy
 )
 
 # METRICS
@@ -136,10 +132,48 @@ metrics_result <- bind_rows(
     truth = target_extreme_poverty,
     estimate = .pred_class,
     event_level = "second"
+  ),
+  
+  sens(
+    result,
+    truth = target_extreme_poverty,
+    estimate = .pred_class,
+    event_level = "second"
+  ),
+  
+  spec(
+    result,
+    truth = target_extreme_poverty,
+    estimate = .pred_class,
+    event_level = "second"
+  ),
+  
+  pr_auc(
+    result,
+    truth = target_extreme_poverty,
+    .pred_extreme,
+    event_level = "second"
+  ),
+  
+  roc_auc(
+    result,
+    truth = target_extreme_poverty,
+    .pred_extreme,
+    event_level = "second"
   )
 )
 
 print(metrics_result)
+
+# CONFUSION MATRIX
+
+conf_result <- conf_mat(
+  result,
+  truth = target_extreme_poverty,
+  estimate = .pred_class
+)
+
+print(conf_result)
 
 # SAVE MODEL
 

@@ -6,6 +6,7 @@
 library(here)
 library(dplyr)
 library(caret)
+library(tibble)
 
 source(
   here(
@@ -17,14 +18,14 @@ source(
 
 # LOAD DATA
 
-train_baked <- readRDS(
+train_recipe_baked <- readRDS(
   file.path(
     PATH_PROCESSED,
     "train_baked.rds"
   )
 )
 
-test_baked <- readRDS(
+test_recipe_baked <- readRDS(
   file.path(
     PATH_PROCESSED,
     "test_baked.rds"
@@ -33,7 +34,7 @@ test_baked <- readRDS(
 
 # REMOVE TARGET
 
-x_train <- train_baked %>%
+x_train <- train_recipe_baked %>%
   select(
     -target_extreme_poverty
   )
@@ -46,7 +47,10 @@ sparse_pct <- sapply(
     
     if (is.numeric(x)) {
       
-      mean(x == 0, na.rm = TRUE)
+      mean(
+        x == 0,
+        na.rm = TRUE
+      )
       
     } else {
       
@@ -59,20 +63,25 @@ sparse_vars <- names(
   sparse_pct[sparse_pct >= 0.995]
 )
 
-train_selected <- train_baked %>%
+train_feature_selected <- train_recipe_baked %>%
   select(
     -any_of(sparse_vars)
   )
 
-test_selected <- test_baked %>%
+test_feature_selected <- test_recipe_baked %>%
   select(
     -any_of(sparse_vars)
   )
 
 # REMOVE HIGH CORRELATION
 
-numeric_train <- train_selected %>%
-  select(where(is.numeric))
+numeric_train <- train_feature_selected %>%
+  select(
+    where(is.numeric)
+  ) %>%
+  select(
+    -target_extreme_poverty
+  )
 
 corr_matrix <- cor(
   numeric_train,
@@ -92,12 +101,12 @@ if (length(high_corr) > 0) {
     numeric_train
   )[high_corr]
   
-  train_selected <- train_selected %>%
+  train_feature_selected <- train_feature_selected %>%
     select(
       -any_of(remove_corr_vars)
     )
   
-  test_selected <- test_selected %>%
+  test_feature_selected <- test_feature_selected %>%
     select(
       -any_of(remove_corr_vars)
     )
@@ -106,7 +115,7 @@ if (length(high_corr) > 0) {
 # SAVE OUTPUT
 
 saveRDS(
-  train_selected,
+  train_feature_selected,
   file.path(
     PATH_PROCESSED,
     "train_selected.rds"
@@ -114,14 +123,14 @@ saveRDS(
 )
 
 saveRDS(
-  test_selected,
+  test_feature_selected,
   file.path(
     PATH_PROCESSED,
     "test_selected.rds"
   )
 )
 
-# FEATURE SUMMARY
+# SUMMARY
 
 feature_summary <- tibble(
   metric = c(
@@ -131,10 +140,10 @@ feature_summary <- tibble(
     "final_features"
   ),
   value = c(
-    ncol(train_baked),
+    ncol(train_recipe_baked),
     length(sparse_vars),
     length(remove_corr_vars),
-    ncol(train_selected)
+    ncol(train_feature_selected)
   )
 )
 
