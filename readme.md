@@ -61,25 +61,39 @@ graph TD
 
 ## 📁 Struktur Direktori & Dokumentasi Alur
 
-Untuk mempermudah pemahaman alur kerja proyek ini, dokumentasi telah dibagi menjadi beberapa bagian:
+Proyek ini telah direstrukturisasi agar mampu menangani berbagai topik *machine learning* (seperti *smoker classification* dan *extreme poverty*) menggunakan satu *datasource* terpusat (SUSENAS). 
 
-```
+```text
 r-classification/
-├── readme.md                             # Halaman utama (Dokumentasi Ringkas)
-├── klasifikasi_perokok_jambi_v3.qmd      # [TERBARU] Pipeline Modeling v3 Full R (Quarto)
-├── klasifikasi_perokok_jambi_r_clean.qmd # Pipeline Cleaning Full R
-├── klasifikasi_perokok_jambi.qmd         # Pipeline lawas (Hybrid)
-├── docs/                                 # 📖 Dokumentasi Detail Alur Proyek
-│   ├── 01_data_engineering.md            # Detail Ekstraksi Data (Legacy Python)
-│   ├── 02_preprocessing.md               # Detail Preprocessing & Seleksi Fitur
-│   ├── 03_modeling.md                    # Detail Pemodelan Machine Learning
-│   ├── research/                         # Folder Laporan Riset Sesi (Sesi 1 & 2)
-│   │   ├── session_1_exploration/        # Riset Korelasi Ekstensif & Gender Split
-│   │   └── session_2_v3_model/           # Evaluasi & Optimasi Model v3 (Metrics Limits)
-│   └── task-context/                     # Histori Ringkasan Konteks Proyek (ex: conv-002.md)
-├── scripts/                              # Skrip Legacy (Python) & Scratch (R)
-└── data/                                 # Direktori Data (Mentah .dbf & CSV)
+├── data/
+│   ├── raw/                 # Original SUSENAS DBF files (.dbf, metadata)
+│   ├── shared/              # Shared processed data (hasil filter base untuk Jambi)
+│   ├── smoker/              # Processed data, split train/test khusus klasifikasi perokok
+│   └── extreme_poverty/     # Folder siap pakai untuk data topik extreme poverty
+├── models/
+│   ├── smoker/              # Saved model objects (.rds) untuk perokok
+│   └── extreme_poverty/     # Saved model objects (.rds) untuk poverty
+├── outputs/
+│   ├── smoker/              # Hasil metrik evaluasi (CSV) dan plot
+│   └── extreme_poverty/     
+├── scripts/
+│   ├── shared/              # Skrip bersama, cth: 001_build_rds_jambi.R (raw -> shared)
+│   ├── smoker/              # Pipeline khusus perokok (00_config -> 09_threshold)
+│   ├── extreme_poverty/     # Pipeline khusus poverty (kosong, siap diduplikasi)
+│   └── archive/             # Skrip lawas, duplikat (zai, gpt, gemini), dan backup
+├── docs/                    # 📖 Dokumentasi Detail (Quarto .qmd dan markdown)
+│   ├── 01_data_engineering.md            
+│   ├── klasifikasi_perokok_jambi_v5.qmd  # Laporan Quarto terkini
+│   ├── research/                         
+│   └── task-context/                     
+└── readme.md                # Halaman Utama
 ```
+
+### ➕ Panduan Menambahkan Topik Baru (contoh: Extreme Poverty)
+1. **Gunakan Data Base Shared**: Semua topik baru harus bersumber dari `data/shared/jambi_ind.rds` atau `jambi_rt.rds`. Jalankan `scripts/shared/001_build_rds_jambi.R` jika data *base* tersebut belum ada.
+2. **Duplikasi Skrip Workflow**: Buat alur *pipeline* baru di dalam `scripts/extreme_poverty/` (Anda dapat meng-copy file `.R` dari `scripts/smoker/`).
+3. **Modifikasi Target & Feature Engineering**: Sesuaikan pembuatan variabel target `Y` (misal untuk kemiskinan ekstrem, ubah kondisinya sesuai kolom yang relevan) pada tahap awal.
+4. **Arahkan Output dengan Benar**: Pastikan semua hasil `saveRDS` maupun keluaran CSV menggunakan *path* dinamis `here("data", "extreme_poverty", ...)` atau folder model yang bersesuaian.
 
 ### Navigasi Dokumentasi Riset Terbaru:
 1. **[Riset Sesi 1: Exploration](docs/research/session_1_exploration/session_1_exploration.md)** - Mengungkap kelemahan Baseline & Penemuan korelasi historis merokok yang tinggi (`R1209`).

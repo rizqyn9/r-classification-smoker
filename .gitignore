@@ -25,7 +25,8 @@ models/*
 # data
 data/raw/*
 data/shared/*
-data/topics/*/*
+data/smoker/*
+data/extreme_poverty/*
 
 # Mac
 .DS_Store
