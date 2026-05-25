@@ -1,0 +1,571 @@
+# Extreme Poverty Classification Pipeline
+
+## Project Structure
+
+```text id="7v60bh"
+project-root/
+│
+├── data/
+│   └── extreme_poverty/
+│       ├── raw/
+│       ├── interim/
+│       └── processed/
+│
+├── models/
+│   └── extreme_poverty/
+│
+├── outputs/
+│   └── extreme_poverty/
+│
+├── scripts/
+│   └── extreme_poverty/
+│       ├── 00_config.R
+│       ├── 01_load_merge.R
+│       ├── 02_clean_data.R
+│       ├── 03_create_target.R
+│       ├── 04_split_data.R
+│       ├── 05_prepare_recipe.R
+│       ├── 06_bake_recipe.R
+│       ├── 06a_fix_datatypes.R
+│       ├── 08_feature_selection.R
+│       ├── 09a_remove_leakage.R
+│       ├── 09_train_logistic.R
+│       ├── 10_train_xgboost.R
+│       ├── 11_threshold_tuning.R
+│       └── 12_feature_importance.R
+│
+└── README.md
+```
+
+---
+
+# Pipeline Overview
+
+Pipeline menggunakan pendekatan stepped workflow.
+
+Setiap script:
+
+* memiliki single responsibility
+* memiliki input dan output yang jelas
+* menghasilkan artifact `.rds`
+* dapat di-rerun secara independen
+
+---
+
+# Pipeline Rules
+
+## Naming Convention
+
+Semua script menggunakan format:
+
+```text id="8zaxf7"
+00_
+01_
+02_
+xx_
+```
+
+Contoh:
+
+```text id="lk7i3q"
+00_config.R
+01_load_merge.R
+09_train_logistic.R
+```
+
+---
+
+## Script Rules
+
+Setiap file wajib memiliki header:
+
+```r id="gq0i6h"
+# ==============================================================================
+# filename.R
+# Script Description
+# ==============================================================================
+```
+
+---
+
+## Console Output Rules
+
+Gunakan:
+
+* `message()`
+* `print()`
+
+Hindari:
+
+* excessive `cat()`
+* unnecessary console spam
+
+---
+
+## Code Quality Rules
+
+### Wajib
+
+* explicit pipeline
+* clean variable naming
+* avoid duplicated logic
+* avoid magic number
+* avoid hidden dependency
+* consistent indentation
+* stable artifact naming
+
+### Hindari
+
+* namespace berlebihan
+* separator comment berlebihan
+* mutate berulang tanpa kebutuhan
+* nested pipe yang terlalu panjang
+
+---
+
+# Data Flow
+
+## 00_config.R
+
+Global configuration project.
+
+### Output
+
+Global variables:
+
+* path
+* feature name
+* metric target
+* file name
+
+---
+
+## 01_load_merge.R
+
+### Purpose
+
+* load raw DBF
+* filter province
+* extract KRT
+* merge RT + IND
+
+### Input
+
+```text id="24m2ud"
+raw/*.dbf
+```
+
+### Output
+
+```text id="n6ohjc"
+processed/krt_base.rds
+```
+
+---
+
+## 02_clean_data.R
+
+### Purpose
+
+* remove duplicate columns
+* standardize NA
+* basic cleaning
+* validate dataset
+
+### Input
+
+```text id="xz3k5q"
+krt_base.rds
+```
+
+### Output
+
+```text id="2mmyu8"
+processed/krt_clean.rds
+```
+
+---
+
+## 03_create_target.R
+
+### Purpose
+
+Create target variable:
+
+* extreme poverty classification
+
+### Input
+
+```text id="mgz57r"
+krt_clean.rds
+```
+
+### Output
+
+```text id="1j7lmo"
+processed/krt_target.rds
+```
+
+---
+
+## 04_split_data.R
+
+### Purpose
+
+Train-test split.
+
+### Input
+
+```text id="mwwsxy"
+krt_target.rds
+```
+
+### Output
+
+```text id="vxh8g0"
+interim/train_data.rds
+interim/test_data.rds
+```
+
+---
+
+## 05_prepare_recipe.R
+
+### Purpose
+
+Prepare preprocessing recipe:
+
+* imputation
+* novel level handling
+* dummy encoding
+* zero variance removal
+
+### Input
+
+```text id="5d17jx"
+train_data.rds
+```
+
+### Output
+
+```text id="q4v8k7"
+processed/base_recipe.rds
+```
+
+---
+
+## 06_bake_recipe.R
+
+### Purpose
+
+Apply recipe preprocessing.
+
+### Input
+
+```text id="9jlwmj"
+base_recipe.rds
+train_data.rds
+test_data.rds
+```
+
+### Output
+
+```text id="wr13z6"
+processed/train_baked.rds
+processed/test_baked.rds
+```
+
+---
+
+## 06a_fix_datatypes.R
+
+### Purpose
+
+Fix datatype consistency after baking.
+
+### Numeric Variables
+
+* continuous variable
+* measurement variable
+* weight variable
+
+### Factor Variables
+
+* categorical SUSENAS code
+
+### Input
+
+```text id="fs4ng5"
+train_data.rds
+test_data.rds
+```
+
+### Output
+
+```text id="5v8z2j"
+interim/train_data_typed.rds
+interim/test_data_typed.rds
+```
+
+---
+
+## 08_feature_selection.R
+
+### Purpose
+
+Feature reduction:
+
+* sparse feature removal
+* high correlation removal
+
+### Input
+
+```text id="p8mf34"
+train_baked.rds
+test_baked.rds
+```
+
+### Output
+
+```text id="8mj0k0"
+train_selected.rds
+test_selected.rds
+```
+
+### Rules
+
+#### Sparse Threshold
+
+```r id="x2wz3j"
+>= 99.5% zero
+```
+
+#### Correlation Threshold
+
+```r id="pfkh1h"
+0.98
+```
+
+---
+
+## 09a_remove_leakage.R
+
+### Purpose
+
+Remove leakage and proxy variables.
+
+### Removed Features
+
+#### Social Assistance
+
+```text id="hm0q7v"
+R22*
+```
+
+#### Quantile Variables
+
+```text id="r93k7o"
+KUINTIL*
+DISTRI*
+```
+
+#### Weight Variable
+
+```text id="3tbax9"
+FWT
+```
+
+### Input
+
+```text id="g5ib1k"
+train_selected.rds
+test_selected.rds
+```
+
+### Output
+
+```text id="4v5i9z"
+train_model.rds
+test_model.rds
+```
+
+---
+
+## 09_train_logistic.R
+
+### Purpose
+
+Baseline logistic regression model.
+
+### Metrics
+
+* accuracy
+* recall
+* precision
+* f1
+* balanced accuracy
+* sensitivity
+* specificity
+* PR AUC
+* ROC AUC
+
+### Input
+
+```text id="e4g0q8"
+train_model.rds
+test_model.rds
+```
+
+### Output
+
+```text id="gl9fwx"
+models/logistic_baseline.rds
+```
+
+---
+
+## 10_train_xgboost.R
+
+### Purpose
+
+Train XGBoost model.
+
+### Expected Improvement
+
+* higher recall
+* better minority detection
+* threshold optimization
+
+---
+
+## 11_threshold_tuning.R
+
+### Purpose
+
+Probability threshold optimization.
+
+### Target
+
+Optimize:
+
+* recall
+* balanced accuracy
+
+---
+
+## 12_feature_importance.R
+
+### Purpose
+
+Model explainability.
+
+### Output
+
+Top feature importance:
+
+* gain
+* cover
+* frequency
+
+---
+
+# Recommended Workflow
+
+## First Run
+
+Run sequentially:
+
+```text id="5yy9na"
+00 → 01 → 02 → 03 → 04 → 05 → 06 → 08 → 09a → 09
+```
+
+---
+
+## Experiment Workflow
+
+If only model changes:
+
+```text id="fh4eqe"
+09 → 10 → 11 → 12
+```
+
+No need rerun preprocessing.
+
+---
+
+## Feature Engineering Workflow
+
+If feature selection changes:
+
+```text id="pjlwm1"
+08 → 09a → 09 → 10 → 11 → 12
+```
+
+---
+
+# Best Practices
+
+## DO
+
+* rerun only impacted steps
+* keep artifact naming stable
+* validate every output
+* use clear dependency chain
+* print concise metrics only
+
+---
+
+## DON'T
+
+* rename artifact randomly
+* overwrite unrelated artifact
+* mix preprocessing + modeling
+* add unnecessary console logs
+* create hidden dependency between scripts
+
+---
+
+# Current Baseline Result
+
+## Logistic Regression
+
+| Metric            | Value |
+| ----------------- | ----: |
+| Accuracy          | 0.994 |
+| Recall            | 0.615 |
+| Precision         | 0.727 |
+| F1 Score          | 0.667 |
+| Balanced Accuracy | 0.807 |
+| PR AUC            | 0.672 |
+| ROC AUC           | 0.995 |
+
+---
+
+# Notes
+
+## Class Imbalance
+
+Extreme poverty class is highly imbalanced.
+
+Because of that:
+
+* accuracy is not primary metric
+* recall and balanced accuracy are prioritized
+
+---
+
+## Target Metric
+
+Defined in:
+
+```text id="2lm8om"
+00_config.R
+```
+
+Example:
+
+```r id="y3vwbm"
+TARGET_RECALL <- 0.75
+TARGET_BAL_ACC <- 0.80
+TARGET_ACC <- 0.85
+```
