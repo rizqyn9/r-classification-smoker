@@ -1,6 +1,3 @@
-# Filtered/Generated Jambi data (optional, but keep it tracked or ignored as needed)
-# data/*_jambi.csv
-
 # R Specific
 .Rhistory
 .RData
@@ -20,16 +17,15 @@
 *.epub
 
 # temp
-klasifikasi_perokok_jambi.htmlcatboost_info/
+catboost_info/
 .positai
 outputs/*
 models/*
 
 # data
 data/raw/*
-data/processed/*
-data/output/*
-data/interim/*
+data/shared/*
+data/topics/*/*
 
 # Mac
 .DS_Store

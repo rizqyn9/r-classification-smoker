@@ -20,8 +20,8 @@ rm(ind_dbf, rt_dbf)
 gc()
 
 # Pastikan folder tujuan ada
-if(!dir.exists(here("data", "processed"))) dir.create(here("data", "processed"), recursive = TRUE)
+if(!dir.exists(here("data", "shared"))) dir.create(here("data", "shared"), recursive = TRUE)
 
 # Simpan RDS
-saveRDS(jambi_ind, here("data", "processed","jambi_ind.rds"))
-saveRDS(jambi_rt,  here("data", "processed","jambi_rt.rds"))
+saveRDS(jambi_ind, here("data", "shared","jambi_ind.rds"))
+saveRDS(jambi_rt,  here("data", "shared","jambi_rt.rds"))
