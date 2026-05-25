@@ -1,19 +1,45 @@
 ---
 title: "Transformasi Digital Data SUSENAS: Peta Prediktif Kemiskinan Ekstrem Multidimensi"
-subtitle: "Studi Kasus Provinsi Jawa Tengah - Optimalisasi Pipa Machine Learning Berbasis Kor 2024"
+subtitle: "Studi Kasus Jawa Tengah | Machine Learning Pipeline Berbasis KOR 2024"
 author: "Tim Data Science & Perencana Kebijakan Publik"
-date: "2026-05-25"
+date: today
+lang: id
+
 format:
   html:
     toc: true
     toc-depth: 3
-    theme: flatly
+    toc-location: left
+    number-sections: true
+    smooth-scroll: true
+    theme:
+      light: flatly
+      dark: darkly
     highlight-style: tango
     code-fold: show
+    code-tools: true
+    code-copy: true
+    embed-resources: true
+    self-contained: true
+    page-layout: full
+    grid:
+      sidebar-width: 250px
+      body-width: 900px
+      margin-width: 300px
+
 execute:
   echo: true
   warning: false
   message: false
+  cache: true
+  freeze: auto
+
+editor: visual
+
+params:
+  province_code: "33"
+  imbalance_ratio: 0.15
+  seed: 42
 ---
 
 ## 1. Pendahuluan dan Pentingnya Pemodelan Wilayah Jawa Tengah
@@ -46,6 +72,8 @@ library(themis)
 library(xgboost)
 library(ggplot2)
 
+set.seed(params$seed)
+
 ```
 
 ---
@@ -56,6 +84,7 @@ Unit analisis terkecil yang digunakan adalah level **Rumah Tangga**, di mana kar
 
 ```{r}
 #| label: data-ingestion
+#| cache: true
 
 # 1. Inisialisasi Jalur Data
 PATH_RAW <- here("data", "raw")
@@ -202,7 +231,6 @@ Data dipisahkan secara acak terskala (*stratified random splitting*) menjadi dat
 ```{r}
 #| label: split-and-missing-handling
 
-set.seed(42)
 split1     <- initial_split(krt_target, prop = 0.8, strata = target_extreme_poverty)
 train_full <- training(split1)
 test_final <- testing(split1)
