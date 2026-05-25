@@ -1,12 +1,11 @@
 # ==============================================================================
 # 09_train_logistic.R
-# Logistic Regression Baseline
+# Logistic Regression Baseline (Clean Version)
 # ==============================================================================
 
+library(tidymodels)
 library(here)
 library(dplyr)
-library(tidymodels)
-library(tibble)
 
 source(
   here(
@@ -17,172 +16,83 @@ source(
 )
 
 # LOAD DATA
+train <- readRDS(file.path(PATH_PROCESSED, "train_selected.rds"))
+test  <- readRDS(file.path(PATH_PROCESSED, "test_selected.rds"))
 
-train_model_ready <- readRDS(
-  file.path(
-    PATH_PROCESSED,
-    "train_model_ready.rds"
-  )
-)
+# ENSURE TARGET IS FACTOR
+train <- train %>%
+  mutate(target_extreme_poverty = factor(target_extreme_poverty))
 
-test_model_ready <- readRDS(
-  file.path(
-    PATH_PROCESSED,
-    "test_model_ready.rds"
-  )
-)
-
-# CONVERT TARGET
-
-train_model_ready <- train_model_ready %>%
-  mutate(
-    target_extreme_poverty = factor(
-      target_extreme_poverty
-    )
-  )
-
-test_model_ready <- test_model_ready %>%
-  mutate(
-    target_extreme_poverty = factor(
-      target_extreme_poverty
-    )
-  )
+test <- test %>%
+  mutate(target_extreme_poverty = factor(target_extreme_poverty))
 
 # MODEL SPEC
-
 log_spec <- logistic_reg() %>%
-  set_engine(
-    "glm"
-  ) %>%
-  set_mode(
-    "classification"
-  )
+  set_engine("glm") %>%
+  set_mode("classification")
 
 # FIT MODEL
-
 log_fit <- fit(
   log_spec,
   target_extreme_poverty ~ .,
-  data = train_model_ready
+  data = train
 )
 
 # PREDICT PROBABILITY
+test_pred <- predict(log_fit, test, type = "prob")
 
-test_prob <- predict(
-  log_fit,
-  test_model_ready,
-  type = "prob"
-)
-
-# PREDICT CLASS
-
-test_class <- predict(
-  log_fit,
-  test_model_ready,
-  type = "class"
-)
-
-# COMBINE RESULT
-
+# COMBINE RESULT + THRESHOLDING
 result <- bind_cols(
-  
-  test_model_ready %>%
-    select(
-      target_extreme_poverty
-    ),
-  
-  test_prob,
-  
-  test_class
-)
-
-# METRICS
-
-metrics_result <- bind_rows(
-  
-  accuracy(
-    result,
-    truth = target_extreme_poverty,
-    estimate = .pred_class
-  ),
-  
-  recall(
-    result,
-    truth = target_extreme_poverty,
-    estimate = .pred_class,
-    event_level = "second"
-  ),
-  
-  precision(
-    result,
-    truth = target_extreme_poverty,
-    estimate = .pred_class,
-    event_level = "second"
-  ),
-  
-  f_meas(
-    result,
-    truth = target_extreme_poverty,
-    estimate = .pred_class,
-    event_level = "second"
-  ),
-  
-  bal_accuracy(
-    result,
-    truth = target_extreme_poverty,
-    estimate = .pred_class,
-    event_level = "second"
-  ),
-  
-  sens(
-    result,
-    truth = target_extreme_poverty,
-    estimate = .pred_class,
-    event_level = "second"
-  ),
-  
-  spec(
-    result,
-    truth = target_extreme_poverty,
-    estimate = .pred_class,
-    event_level = "second"
-  ),
-  
-  pr_auc(
-    result,
-    truth = target_extreme_poverty,
-    .pred_extreme,
-    event_level = "second"
-  ),
-  
-  roc_auc(
-    result,
-    truth = target_extreme_poverty,
-    .pred_extreme,
-    event_level = "second"
+  test %>% select(target_extreme_poverty),
+  test_pred
+) %>%
+  mutate(
+    .pred_class = factor(
+      ifelse(.pred_extreme >= 0.3, "extreme", "non_extreme"),
+      levels = c("non_extreme", "extreme")
+    )
   )
+
+# METRICS (CLASS-BASED)
+metrics_result <- metric_set(
+  accuracy,
+  sens,
+  spec,
+  precision,
+  recall,
+  f_meas,
+  bal_accuracy
+)(
+  result,
+  truth = target_extreme_poverty,
+  estimate = .pred_class,
+  event_level = "second"
 )
 
 print(metrics_result)
 
-# CONFUSION MATRIX
-
-conf_result <- conf_mat(
+# PROBABILITY METRICS (IMPORTANT FOR IMBALANCE)
+roc_auc_result <- roc_auc(
   result,
   truth = target_extreme_poverty,
-  estimate = .pred_class
+  .pred_extreme,
+  event_level = "second"
 )
 
-print(conf_result)
+pr_auc_result <- pr_auc(
+  result,
+  truth = target_extreme_poverty,
+  .pred_extreme,
+  event_level = "second"
+)
+
+print(roc_auc_result)
+print(pr_auc_result)
 
 # SAVE MODEL
-
 saveRDS(
   log_fit,
-  file.path(
-    PATH_MODELS,
-    "logistic_baseline.rds"
-  )
+  file.path(PATH_MODELS, "logistic_baseline.rds")
 )
 
 message("09_train_logistic completed")
