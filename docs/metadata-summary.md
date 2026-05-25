@@ -1,5 +1,3 @@
-Berikut adalah konversi data dari file Excel tersebut ke dalam format Markdown yang terstruktur. Format ini dirancang agar sangat *readable* untuk AI Agent, di mana tanda bintang (`*`) pada kolom variabel di sheet kedua telah digabungkan ke dalam induk variabelnya agar konteksnya jelas (Key-Value Mapping).
-
 # Metadata KOR 202403
 
 ## 1. Variable Label (KOR RT)
