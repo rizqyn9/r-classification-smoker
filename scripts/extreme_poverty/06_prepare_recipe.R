@@ -1,6 +1,6 @@
 # ==============================================================================
 # 06_prepare_recipe.R
-# Build Modeling Recipe
+# Build Modeling Recipe (Improved)
 # ==============================================================================
 
 library(here)
@@ -15,16 +15,17 @@ source(
   )
 )
 
+# ==============================================================================
 # LOAD TRAIN DATA
+# ==============================================================================
 
 train_data <- readRDS(
-  file.path(
-    PATH_INTERIM,
-    "train_data.rds"
-  )
+  file.path(PATH_INTERIM, "train_data.rds")
 )
 
-# REMOVE IDENTIFIER VARIABLES
+# ==============================================================================
+# IDENTIFIER VARIABLES
+# ==============================================================================
 
 id_vars <- c(
   KEY_ID,
@@ -36,43 +37,38 @@ id_vars <- c(
   "SSU"
 )
 
-# CREATE RECIPE
+# ==============================================================================
+# RECIPE DEFINITION
+# ==============================================================================
 
 model_recipe <- recipe(
   target_extreme_poverty ~ .,
   data = train_data
 ) %>%
   
-  step_rm(
-    any_of(id_vars)
-  ) %>%
+  # REMOVE IDENTIFIERS
+  step_rm(any_of(id_vars)) %>%
   
-  step_zv(
-    all_predictors()
-  ) %>%
+  # HANDLE FACTOR LEVELS FIRST (BEST PRACTICE ORDER)
+  step_novel(all_nominal_predictors()) %>%
+  step_unknown(all_nominal_predictors()) %>%
   
-  step_unknown(
-    all_nominal_predictors()
-  ) %>%
+  # ZERO VARIANCE (BEFORE IMPUTATION = OK, BUT SAFER AFTER CLEANING)
+  step_zv(all_predictors()) %>%
   
-  step_novel(
-    all_nominal_predictors()
-  ) %>%
+  # IMPUTATION
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_impute_median(all_numeric_predictors()) %>%
   
-  step_impute_mode(
-    all_nominal_predictors()
-  ) %>%
+  # ENCODING
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>%
   
-  step_impute_median(
-    all_numeric_predictors()
-  ) %>%
-  
-  step_dummy(
-    all_nominal_predictors(),
-    one_hot = FALSE
-  )
+  # FINAL SAFETY CHECK (IMPORTANT AFTER DUMMY CREATION)
+  step_zv(all_predictors())
 
+# ==============================================================================
 # PREP RECIPE
+# ==============================================================================
 
 recipe_prep <- prep(
   model_recipe,
@@ -80,14 +76,13 @@ recipe_prep <- prep(
   retain = TRUE
 )
 
+# ==============================================================================
 # SAVE OUTPUT
+# ==============================================================================
 
 saveRDS(
   recipe_prep,
-  file.path(
-    PATH_PROCESSED,
-    "recipe_prep.rds"
-  )
+  file.path(PATH_PROCESSED, "recipe_prep.rds")
 )
 
 message("06_prepare_recipe completed")
