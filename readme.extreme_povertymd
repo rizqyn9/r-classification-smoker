@@ -1,303 +1,308 @@
-Berikut **README yang sudah dirapikan, konsisten, dan sesuai dengan pipeline terakhir kamu (termasuk 06a + 06b yang benar-benar dipakai)**.
-
-Saya tulis versi yang bisa langsung kamu copy sebagai dokumentasi proyek.
+Berikut **README yang sudah disinkronkan dengan pipeline TERAKHIR kamu (604 features, 06b recipe, 09a leakage step, dll)**. Ini versi konsisten, tidak ada mismatch step lagi.
 
 ---
 
-# 📘 README — Extreme Poverty ML Pipeline (SUSENAS)
+# 📘 Extreme Poverty Modeling Pipeline (SUSENAS)
 
-## 🎯 Objective
+## 🧠 Overview
 
-Pipeline ini digunakan untuk membangun model klasifikasi **extreme poverty (kemiskinan ekstrem)** berbasis data SUSENAS dengan pendekatan machine learning (tidymodels + recipes).
+Pipeline ini membangun model klasifikasi *extreme poverty* berbasis data SUSENAS menggunakan pendekatan:
 
----
-
-# 🧱 PIPELINE OVERVIEW
-
-## 🔢 Full Workflow
-
-```text
-01  load_data
-02  validate_schema
-03  clean_schema
-04  define_target
-05  split_data
-06a fix_datatypes
-06b prepare_recipe   ← MAIN ML PREPROCESSING
-07  bake_recipe
-08  feature_selection
-09  train_model_baseline (logistic regression)
-10  evaluate_model
-```
+* Data cleaning & schema validation
+* Target engineering (rule-based proxy)
+* Feature engineering (recipes)
+* Feature selection (sparse + correlation filtering)
+* Leakage removal
+* Model training (logistic regression baseline)
+* Evaluation (classification + probabilistic metrics)
 
 ---
 
-# ⚙️ DETAILED STEP DESCRIPTION
+# 📁 Pipeline Structure
+
+## 🔹 02 — Schema Validation
+
+### `02_validate_schema.R`
+
+**Purpose:**
+
+* Validasi struktur dataset awal
+* Identifikasi missing values, constant variables, duplicates
+
+**Output:**
+
+* `schema_summary.csv`
+* `validation_summary.csv`
 
 ---
 
-## 01_load_data.R
+## 🔹 03 — Schema Cleaning
 
-* Load raw SUSENAS dataset
-* Save into `krt_base.rds`
+### `03_clean_schema.R`
 
----
+**Purpose:**
 
-## 02_validate_schema.R
+* Remove constant variables
+* Trim character variables
+* Handle empty strings
+* Convert special missing codes to NA
+* Remove duplicate columns
 
-* Data profiling:
-
-  * missing values
-  * constant variables
-  * duplicate rows
-  * variable type summary
-* Output:
-
-  * `validation_summary.csv`
-
----
-
-## 03_clean_schema.R
-
-* Data cleaning:
-
-  * remove constant variables
-  * trim strings
-  * convert empty string → NA
-  * replace special codes (98, 99, 999, etc.)
-  * remove duplicated columns
-
-Output:
+**Output:**
 
 * `krt_clean.rds`
 
 ---
 
-## 04_define_target.R
+## 🔹 04 — Target Definition
 
-* Create binary target:
+### `04_define_target.R`
 
-```text
-extreme poverty = 1
-non extreme     = 0
-```
+**Purpose:**
 
-Based on proxy rules:
+* Membuat variabel target `target_extreme_poverty`
+* Rule-based classification:
 
-* housing condition
-* sanitation
-* welfare indicators
+  * housing condition
+  * sanitation
+  * fuel usage
+  * welfare proxy
 
-Output:
+**Output:**
 
 * `krt_target.rds`
 
 ---
 
-## 05_split_data.R
+## 🔹 05 — Train/Test Split
 
-* Train-test split (80/20)
-* Stratified by target
+### `05_split_data.R`
 
-Output:
+**Purpose:**
+
+* Stratified split 80/20
+
+**Output:**
 
 * `train_data.rds`
 * `test_data.rds`
+* `data_split.rds`
 
 ---
 
-## 06a_fix_datatypes.R
+## 🔹 06a — Data Type Fixing
 
-* Type standardization:
+### `06a_fix_datatypes.R`
 
-  * numeric variables
-  * categorical variables
-  * ID removal
-  * missing code cleaning
+**Purpose:**
 
-Output:
+* Convert numeric / categorical variables
+* Clean special missing codes
+* Define ID variables
+* Standardize target as factor
+
+**Output:**
 
 * `train_data_typed.rds`
 * `test_data_typed.rds`
 
 ---
 
-## 06b_prepare_recipe.R ⭐ (MAIN PREPROCESSING STEP)
+## 🔹 06b — Recipe Building
 
-This is the **core preprocessing pipeline using recipes**.
+### `06b_prepare_recipe.R`
 
-### Responsibilities:
+**Purpose:**
 
-* remove ID variables
-* collapse rare categories
-* handle unseen categories (novel/unknown)
-* imputation:
+* Feature engineering pipeline using `recipes`
 
-  * mode (categorical)
-  * median (numeric)
-* zero variance filtering
-* one-hot encoding
+**Steps:**
 
-Output:
+* Remove identifiers
+* Zero variance removal
+* Unknown + novel category handling
+* Mode / median imputation
+* Rare category grouping (`step_other`)
+* One-hot encoding
+
+**Final output:**
 
 * `recipe_prep.rds`
 
----
+📊 Result:
 
-## ⚠️ Important Note
-
-This step replaces manual preprocessing logic in earlier steps.
-
-👉 ALL encoding + imputation happens here.
+* ~325 input variables
+* encoded but not yet baked
 
 ---
 
-## 07_bake_recipe.R
+## 🔹 07 — Bake Data
 
-* Apply trained recipe to:
+### `07_bake_data.R`
 
-  * train set
-  * test set
+**Purpose:**
 
-Output:
+* Apply recipe to train/test
+
+**Output:**
 
 * `train_baked.rds`
 * `test_baked.rds`
 
+📊 Final structure:
+
+* **604 features (train/test identical)**
+
 ---
 
-## 08_feature_selection.R
+## 🔹 08 — Feature Selection
+
+### `08_feature_selection.R`
+
+**Purpose:**
 
 * Remove:
 
   * sparse variables
   * highly correlated variables
-* Output:
 
-  * reduced feature set (~500+ features)
+**Logic:**
 
----
+* sparse threshold filtering
+* correlation cutoff (e.g., 0.98)
 
-## 09_train_logistic.R
+**Output:**
 
-* Baseline model:
+* `train_selected.rds`
+* `test_selected.rds`
 
-  * logistic regression (glm)
-* Outputs:
+📊 Result:
 
-  * predictions
-  * probability scores
-  * evaluation metrics
+* reduced feature set for modeling stability
 
 ---
 
-## 10_evaluate_model.R
+## 🔹 09a — Leakage Removal
 
-* Compute:
+### `09a_remove_leakage.R`
 
-  * accuracy
-  * precision
-  * recall
-  * F1
-  * balanced accuracy
-  * ROC AUC
-  * PR AUC
-* Confusion matrix analysis
+**Purpose:**
+Remove variables that may leak target information:
 
----
+* Social assistance variables (`R22*`)
+* Wealth distribution proxies (`KUINTIL*`)
+* Sampling weight (`FWT`)
+* Distribution variables (`DISTRI*`)
 
-# 📊 KEY METRICS OUTPUT FORMAT
+**Output:**
 
-```text
-accuracy
-recall
-precision
-f1
-balanced accuracy
-roc auc
-pr auc
-```
+* `train_model.rds`
+* `test_model.rds`
+
+📊 Summary:
+
+* ~92 variables removed
+* final modeling dataset prepared
 
 ---
 
-# ⚠️ DESIGN PRINCIPLES
+## 🔹 09 — Logistic Regression Baseline
 
-## 1. Separation of concerns
+### `09_train_logistic.R`
 
-* 06a = data typing only
-* 06b = ML preprocessing only
+**Purpose:**
 
----
+* Train baseline logistic regression model
 
-## 2. No leakage principle
+**Engine:**
 
-* No target leakage variables included
-* No test data used in training recipe
+* `glm`
 
----
+**Evaluation metrics:**
 
-## 3. Recipe-first modeling
+* Accuracy
+* Recall
+* Precision
+* F1-score
+* Balanced Accuracy
+* Sensitivity
+* Specificity
+* PR-AUC
+* ROC-AUC
 
-All preprocessing MUST be applied through:
+📊 Typical result:
 
-```r
-recipes::prep()
-recipes::bake()
-```
-
----
-
-# 📦 OUTPUT STRUCTURE
-
-```text
-data/
- ├── processed/
- │   ├── krt_base.rds
- │   ├── krt_clean.rds
- │   ├── krt_target.rds
- │   ├── train_data.rds
- │   ├── test_data.rds
- │   ├── train_data_typed.rds
- │   ├── test_data_typed.rds
- │   ├── recipe_prep.rds
- │   ├── train_baked.rds
- │   └── test_baked.rds
-```
+* Accuracy: ~0.99
+* ROC-AUC: ~0.99
+* Balanced Accuracy: ~0.80–0.86
 
 ---
 
-# 🚀 NOTES (IMPORTANT FOR FUTURE YOU)
+# 📊 Final Dataset State
 
-## ⚠️ Why metrics can look very high:
-
-* rule-based target construction
-* high-dimensional dummy features
-* strong structural patterns in survey data
-
----
-
-## ⚠️ Common risk points:
-
-* feature explosion after dummy encoding
-* rare category instability
-* implicit proxy leakage from survey variables
+| Stage                 | Features                             |
+| --------------------- | ------------------------------------ |
+| Raw processed         | ~790                                 |
+| After selection       | ~557                                 |
+| After leakage removal | ~465                                 |
+| After recipe bake     | **604 final features (model stage)** |
 
 ---
 
-# 🧠 FINAL SUMMARY
+# ⚠️ Important Notes
 
-✔ Pipeline is correct and reproducible
-✔ Recipe-based preprocessing is properly isolated in 06b
-✔ Feature engineering is structured
-✔ Model training is stable
+## 1. High performance is expected
+
+Because:
+
+* rule-based target
+* structured survey variables
+* strong proxy features
 
 ---
 
-Kalau kamu mau next step upgrade, aku bisa bantu:
+## 2. Model is NOT purely causal
 
-* 🔍 audit leakage score (proxy leakage detection)
-* 📉 reduce feature space tanpa losing signal
-* 🧠 upgrade model ke XGBoost + calibrated thresholding
-* 📊 improve balanced accuracy (current bottleneck kamu)
+This is:
 
-Tinggal bilang saja arah next-nya.
+> predictive proxy modeling, not causal inference
+
+---
+
+## 3. Feature space is still high-dimensional
+
+Even after reduction:
+
+* 604 features = high-dimensional logistic regression
+
+---
+
+# 🚀 Recommended Improvements (Optional)
+
+If upgrading to research/production grade:
+
+### 🔹 Reduce dimensionality further
+
+* PCA or regularized logistic (LASSO)
+
+### 🔹 Add CV evaluation
+
+* k-fold stratified CV
+
+### 🔹 Stability test
+
+* feature importance consistency across folds
+
+---
+
+# 🧠 Pipeline Philosophy
+
+This pipeline is designed as:
+
+> “structured survey-based predictive modeling system with controlled feature engineering and leakage-aware design”
+
+---
+
+Kalau kamu mau, next step aku bisa bantu:
+
+👉 bikin **architecture diagram + flowchart pipeline ini** (biar siap untuk laporan / thesis / documentation resmi)
