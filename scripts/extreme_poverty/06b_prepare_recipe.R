@@ -44,7 +44,10 @@ model_recipe <- recipe(
   step_zv(all_predictors()) %>%
   
   # ENCODING LAST
-  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>%
+
+  step_zv(all_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.9)
 
 # ==============================================================================
 # PREP
