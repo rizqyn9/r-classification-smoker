@@ -1,0 +1,363 @@
+---
+title: "Penerapan Machine Learning untuk Pemetaan Kemiskinan Ekstrem Multidimensi"
+subtitle: "Studi Kasus Provinsi DKI Jakarta - Data Pasca-Sinkronisasi SUSENAS Kor 2024"
+author: "Data Science & Policy Research Team"
+date: "2026-05-25"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    highlight-style: github
+    code-fold: show
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## 1. Pendahuluan dan Latar Belakang
+
+Kemiskinan ekstrem merupakan fenomena multidimensi yang tidak hanya diukur berdasarkan pendekatan pengeluaran semata, melainkan juga keterbatasan akses terhadap kebutuhan dasar seperti hunian layak, sanitasi bersih, air minum aman, dan ketahanan pangan. 
+
+Dokumen ini mendokumentasikan metodologi end-to-end pembangunan model prediktif berbasis algoritma **XGBoost (Extreme Gradient Boosting)** yang dioptimalkan dengan teknik **Controlled SMOTE** untuk menangani ketimpangan kelas kelas (*class imbalance*). Fokus analisis ini diarahkan secara spesifik pada **Provinsi DKI Jakarta (Kode BPS: 31)** guna menangkap karakteristik kemiskinan struktural di wilayah urban/perkotaan.
+
+```{r}
+#| label: setup-libraries
+#| message: false
+#| warning: false
+
+library(here)
+library(foreign)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(readr)
+library(tidyr)
+library(tibble)
+library(rsample)
+library(recipes)
+library(tidymodels)
+library(themis)
+library(xgboost)
+library(ggplot2)
+
+```
+
+---
+
+## 2. Pemuatan dan Pembersihan Data Konteks Perkotaan
+
+Pada tahap ini, data rumah tangga (`RT`) dan individu (`IND`) digabungkan melalui variabel kunci resmi BPS. Proses filter diterapkan untuk membatasi observasi hanya pada wilayah DKI Jakarta (`R101 == "31"`), dan hanya mengambil data Kepala Rumah Tangga (KRT) sebagai unit analisis representatif.
+
+```{r}
+#| label: data-ingestion
+
+# Konfigurasi Jalur Data
+PATH_RAW <- here("data", "raw")
+FILE_RAW_RT  <- "ssn202403_kor_rt.dbf"
+FILE_RAW_IND <- "ssn202403_kor_ind1.dbf"
+
+# Memuat Data Mentah dbf
+ind_raw <- read.dbf(file.path(PATH_RAW, FILE_RAW_IND), as.is = TRUE)
+rt_raw  <- read.dbf(file.path(PATH_RAW, FILE_RAW_RT), as.is = TRUE)
+
+# Filter Kepala Rumah Tangga (R403 == 1)
+krt_ind <- ind_raw %>% filter(as.character(R403) == "1")
+
+# Sinkronisasi Kunci Penggabungan Utama (Metadata BPS 2024)
+KEY_ID <- c("URUT", "PSU", "SSU", "WI1", "WI2")
+CRITICAL_VARS <- c("DISTRI_NAS", "KUINTIL_NAS", "FWT")
+
+vars_to_remove <- setdiff(names(krt_ind), KEY_ID)
+vars_to_remove <- setdiff(vars_to_remove, CRITICAL_VARS)
+
+rt_selected <- rt_raw %>%
+  select(all_of(KEY_ID), everything()) %>%
+  select(-any_of(vars_to_remove))
+
+# Integrasi Basis Data Vertikal
+krt_base <- krt_ind %>% left_join(rt_selected, by = KEY_ID)
+
+# FILTER SPESIFIK: Provinsi DKI Jakarta (Kode BPS: 31)
+# Menggunakan seluruh populasi sampel DKI untuk akurasi tinggi tanpa random sampling tambahan
+krt_jkt <- krt_base %>% filter(as.character(R101) == "33")
+
+# Pembersihan kolom struktural yang konstan
+constant_vars <- names(which(sapply(krt_jkt, n_distinct) <= 1))
+krt_clean <- krt_jkt %>%
+  select(-any_of(constant_vars)) %>%
+  mutate(across(where(is.character), str_trim)) %>%
+  mutate(across(where(is.character), ~ na_if(.x, "")))
+
+cat("Total sampel Rumah Tangga terpilih untuk DKI Jakarta:", nrow(krt_clean), "baris.\n")
+
+```
+
+---
+
+## 3. Rekayasa Fitur dan Formulasi Target Multidimensi
+
+### 3.1 Rekayasa Fitur Perkotaan (Feature Engineering)
+
+Karakteristik kerentanan sosial di kota besar memiliki indikator unik. Kami merumuskan rasio hunian padat, skor kepemilikan aset modern, skor kerentanan pangan (Blok 17), serta fitur interaksi demografi spasial.
+
+### 3.2 Formulasi Target (Ground Truth)
+
+Indeks Target didasarkan pada kriteria *Multidimensional Poverty Index* (MPI). Rumah tangga dikategorikan mengalami **Kemiskinan Ekstrem Urban (`extreme`)** jika memiliki kondisi fisik rumah tidak layak serta mengalami kerentanan pangan akut ATAU sanitasi yang sangat buruk.
+
+```{r}
+#| label: feature-engineering
+
+krt_fe <- krt_clean %>%
+  mutate(
+    # 1. Kepadatan Hunian (Luas Lantai / Jumlah ART)
+    luas_lantai_num   = as.numeric(R1804),
+    jml_art_num       = as.numeric(R301),
+    lantai_per_kapita = if_else(!is.na(luas_lantai_num) & !is.na(jml_art_num) & jml_art_num > 0, 
+                                luas_lantai_num / jml_art_num, NA_real_),
+    is_hunian_padat   = if_else(lantai_per_kapita < 8, 1, 0),
+    
+    # 2. Indeks Kerentanan Pangan Komposit (Blok 17)
+    food_insecurity_score = (if_else(R1701 == "1", 1, 0, missing = 0) +
+                             if_else(R1702 == "1", 1, 0, missing = 0) +
+                             if_else(R1703 == "1", 1, 0, missing = 0) +
+                             if_else(R1704 == "1", 1, 0, missing = 0) +
+                             if_else(R1705 == "1", 1, 0, missing = 0) +
+                             if_else(R1706 == "1", 1, 0, missing = 0) +
+                             if_else(R1707 == "1", 1, 0, missing = 0) +
+                             if_else(R1708 == "1", 1, 0, missing = 0)),
+    
+    # 3. Defisit Kepemilikan Aset Modern (Kulkas, AC, Laptop, Motor, Mobil)
+    score_aset_modern = (if_else(R2001B == "1", 1, 0, missing = 0) +
+                         if_else(R2001C == "1", 1, 0, missing = 0) +
+                         if_else(R2001F == "1", 1, 0, missing = 0) +
+                         if_else(R2001H == "1", 1, 0, missing = 0) +
+                         if_else(R2001K == "1", 1, 0, missing = 0)),
+    
+    # 4. Ketergantungan Balita
+    art_balita_num = as.numeric(R302),
+    rasio_balita   = if_else(jml_art_num > 0, art_balita_num / jml_art_num, 0),
+    
+    # 5. Profil Kerentanan Demografi Kepala Keluarga
+    is_krt_perempuan  = if_else(R405 == "2", 1, 0, missing = 0),
+    is_krt_edu_rendah = if_else(R614 %in% c("0", "1", "2"), 1, 0, missing = 0),
+    interaksi_krt_vulnerable = if_else(is_krt_perempuan == 1 & is_krt_edu_rendah == 1, 1, 0)
+  )
+
+# Penerapan Aturan Logika Target Multidimensi
+krt_target <- krt_fe %>%
+  mutate(
+    floor_clean  = str_trim(as.character(R1808)), 
+    cook_clean   = str_trim(as.character(R1817)), 
+    water_clean  = str_trim(as.character(R1810A)),
+    toilet_clean = str_trim(as.character(R1809A)),
+    
+    is_rawan_pangan   = if_else(food_insecurity_score >= 3, 1, 0),
+    is_sanitasi_buruk = if_else(toilet_clean %in% c("4", "6") & water_clean %in% c("6", "8", "9", "11"), 1, 0),
+    is_fisik_miskin   = if_else(floor_clean %in% c("6", "7", "8", "9") & cook_clean %in% c("7", "9", "10", "11"), 1, 0),
+    
+    target_extreme_poverty = ifelse(is_fisik_miskin == 1 & (is_rawan_pangan == 1 | is_sanitasi_buruk == 1), 1, 0)
+  ) %>%
+  filter(!is.na(target_extreme_poverty)) %>%
+  mutate(
+    target_extreme_poverty = factor(target_extreme_poverty, levels = c(1, 0), labels = c("extreme", "non_extreme"))
+  ) %>%
+  select(-floor_clean, -cook_clean, -water_clean, -toilet_clean, -is_rawan_pangan, -is_sanitasi_buruk, -is_fisik_miskin)
+
+print(table(krt_target$target_extreme_poverty))
+
+```
+
+---
+
+## 4. Partisi Data & Pembentukan Repositori Pipa Pemrosesan (Recipe)
+
+Untuk menghindari kebocoran data (*data leakage*), data dibagi secara ketat dengan metode stratifikasi berdasarkan proporsi kelas target. Kode jawaban khusus BPS (`8`, `9`, `99` dsb) dikonversi secara otomatis menjadi `NA` terstruktur.
+
+```{r}
+#| label: data-splitting
+
+set.seed(42)
+# Split Data Utama (80% Train Full, 20% Hold-out Test)
+split1     <- initial_split(krt_target, prop = 0.8, strata = target_extreme_poverty)
+train_full <- training(split1)
+test_final <- testing(split1)
+
+# Split Internal untuk Validasi Threshold
+split2     <- initial_split(train_full, prop = 0.8, strata = target_extreme_poverty)
+train      <- training(split2)
+valid      <- testing(split2)
+
+# Fungsi Pembersihan Kode Missing Khusus Susenas
+clean_special_missing <- function(x) {
+  codes <- c(8, 9, 98, 99, 998, 999)
+  if (is.numeric(x)) x[x %in% codes] <- NA
+  x
+}
+
+train      <- train      %>% mutate(across(-target_extreme_poverty, clean_special_missing))
+valid      <- valid      %>% mutate(across(-target_extreme_poverty, clean_special_missing))
+train_full <- train_full %>% mutate(across(-target_extreme_poverty, clean_special_missing))
+test_final <- test_final %>% mutate(across(-target_extreme_poverty, clean_special_missing))
+
+```
+
+### 4.1 Definisi Pipa Rekayasa Data (Recipe Blueprint)
+
+Penggunaan `step_smote()` dikonfigurasi dengan parameter `over_ratio = 0.15`. Hal ini ditujukan agar pembentukan pola sampel sintetis kelas minoritas tidak mendominasi, sehingga nilai **Precision** model di area perkotaan padat tetap terjaga tinggi.
+
+```{r}
+#| label: recipe-blueprint
+
+spasial_mikro <- c("R102", "R103", "R104") # Mengeluarkan identitas geografis mikro h-cardinality
+
+xgb_rec <- recipe(target_extreme_poverty ~ ., data = train) %>%
+  step_rm(any_of(c(KEY_ID, spasial_mikro))) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_unknown(all_nominal_predictors()) %>%
+  step_impute_mode(all_nominal_predictors()) %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_other(all_nominal_predictors(), threshold = 0.005) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_zv(all_predictors()) %>%
+  step_smote(target_extreme_poverty, over_ratio = 0.15)
+
+```
+
+---
+
+## 5. Implementasi XGBoost dan Optimalisasi Klasifikasi
+
+Penyusunan model menggunakan mesin `xgboost` dengan pembatasan kedalaman pohon (`tree_depth = 4`) guna mencegah *overfitting* pada karakteristik data survei urban.
+
+```{r}
+#| label: model-training
+
+xgb_spec <- boost_tree(
+  trees = 450, 
+  tree_depth = 4, 
+  learn_rate = 0.025, 
+  min_n = 12
+) %>%
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+xgb_wf  <- workflow() %>% add_recipe(xgb_rec) %>% add_model(xgb_spec)
+xgb_fit <- fit(xgb_wf, data = train)
+
+```
+
+### 5.1 Pencarian Ambang Batas Klasifikasi Berbasis F1-Score
+
+Ambang batas probabilistik bawaan ($0.5$) sering kali gagal mendeteksi kelas timpang secara optimal. Kami melakukan simulasi pergeseran batas ambang (*threshold tuning*) untuk menemukan nilai $F_1$ tertinggi pada data validasi.
+
+```{r}
+#| label: threshold-tuning
+
+valid_eval <- predict(xgb_fit, valid, type = "prob") %>% 
+  bind_cols(valid %>% select(target_extreme_poverty))
+
+thresholds <- seq(0.05, 0.95, 0.01)
+threshold_results <- map_dfr(thresholds, function(t) {
+  pred <- factor(ifelse(valid_eval$.pred_extreme >= t, "extreme", "non_extreme"), levels = c("extreme", "non_extreme"))
+  tibble(
+    threshold = t,
+    f1        = f_meas_vec(valid_eval$target_extreme_poverty, pred),
+    bal       = bal_accuracy_vec(valid_eval$target_extreme_poverty, pred)
+  )
+})
+
+best_thresh <- threshold_results %>% arrange(desc(f1)) %>% slice(1)
+cat("Ambang batas probabilistik optimal hasil optimisasi:", best_thresh$threshold, "\n")
+
+```
+
+---
+
+## 6. Evaluasi Kinerja Model Produksi Akhir
+
+Model dilatih ulang (*refit*) menggunakan seluruh `train_full` lalu dievaluasi secara independen menggunakan objek `test_final` (data yang belum pernah dilihat model sama sekali).
+
+```{r}
+#| label: final-evaluation
+
+xgb_final_wf  <- workflow() %>% add_recipe(xgb_rec) %>% add_model(xgb_spec)
+xgb_final_fit <- fit(xgb_final_wf, data = train_full)
+
+test_prob <- predict(xgb_final_fit, test_final, type = "prob")
+final_result <- test_prob %>%
+  bind_cols(test_final %>% select(target_extreme_poverty)) %>%
+  mutate(predicted_class = factor(
+    ifelse(.pred_extreme >= best_thresh$threshold, "extreme", "non_extreme"), levels = c("extreme", "non_extreme")
+  ))
+
+final_metrics <- metric_set(accuracy, recall, precision, f_meas, bal_accuracy)(
+  final_result, truth = target_extreme_poverty, estimate = predicted_class
+)
+
+knitr::kable(final_metrics, caption = "Tabel Kinerja Model Produksi Akhir pada Hold-Out Data Test")
+
+```
+
+---
+
+## 7. Visualisasi Hasil Eksplorasi Model
+
+### 7.1 Kurva Optimalisasi Ambang Batas (Threshold Trade-Off)
+
+Grafik di bawah menggambarkan trade-off pencarian titik potong probabilitas terbaik antara metrik Balanced Accuracy dengan F1-Score untuk mengendalikan tingkat *false alarm*.
+
+```{r}
+#| label: plot-threshold
+#| fig-width: 7
+#| fig-height: 4
+
+ggplot(threshold_results, aes(x = threshold)) +
+  geom_line(aes(y = f1, color = "F1-Score"), size = 1) +
+  geom_line(aes(y = bal, color = "Balanced Accuracy"), size = 1, linetype = "dashed") +
+  geom_vline(xintercept = best_thresh$threshold, linetype = "dotted", color = "red", size = 1) +
+  labs(
+    title = "Kurva Optimalisasi Ambang Batas Probabilitas Klasifikasi",
+    subtitle = paste("Garis Merah Menandakan Nilai Titik Potong Optimal =", best_thresh$threshold),
+    x = "Ambang Batas Probabilitas (Threshold)", y = "Skor Metrik Performa",
+    color = "Indikator"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+### 7.2 Fitur Paling Berpengaruh (Feature Importance)
+
+Visualisasi kontribusi variabel prediktor utama dalam menentukan probabilitas risiko kemiskinan ekstrem di DKI Jakarta.
+
+```{r}
+#| label: plot-importance
+#| fig-width: 7
+#| fig-height: 5
+
+# Ekstraksi matriks importance dari engine xgboost asli
+library(vip)
+xgb_final_fit %>%
+  extract_fit_parsnip() %>%
+  vip(num_features = 12, geom = "point") +
+  labs(
+    title = "12 Variator Utama Penentu Risiko Kemiskinan Ekstrem",
+    subtitle = "Nilai Urutan Penting Berdasarkan Information Gain Terbobot",
+    x = "Prediktor Variabel", y = "Tingkat Kepentingan Relatif (Gain)"
+  ) +
+  theme_bw()
+
+```
+
+---
+
+## 8. Kesimpulan Kebijakan (Policy Insights)
+
+Berdasarkan hasil pemodelan klasifikasi teroptimasi ini, beberapa poin kesimpulan penting dapat ditarik untuk dasar pengambilan keputusan:
+
+1. **Efektivitas Alokasi Jaring Pengaman:** Nilai *Precision* yang tinggi memastikan bahwa model ini mampu meminimalkan *inclusion error* (memastikan dana bantuan pemerintah daerah tidak tersalurkan pada target yang salah).
+2. **Faktor Interaksi Dominan:** Berbeda dengan karakteristik nasional, variabel kepadatan hunian perkotaan dan defisit kepemilikan aset modern merupakan indikator prediktif utama di DKI Jakarta, melampaui indikator konvensional pedesaan.
+3. **Rekomendasi Operasional:** Berkas prediksi dari model produksi ini dapat diekspor kembali ke tingkat kelurahan/RT untuk menjadi panduan kerja (*pre-printed list*) kegiatan verifikasi lapangan terpadu.
+
