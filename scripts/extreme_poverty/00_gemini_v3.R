@@ -263,7 +263,7 @@ best_threshold <- tibble(threshold = best_boundary$threshold)
 message(">> [SUCCESS] Corrected Calibrated Threshold Locked at: ", best_threshold$threshold)
 
 # ------------------------------------------------------------------------------
-# 7. FINAL REFIT & EVALUATION WITH CORRECTED CALIBRATION LAYER
+# 7. FINAL REFIT & EVALUATION WITH CORRECTED CALIBRATION LAYER (FIXED)
 # ------------------------------------------------------------------------------
 message(">> [INFO] Refitting final model on full training data...")
 xgb_final_fit <- fit(xgb_workflow, data = train_full)
@@ -271,7 +271,7 @@ xgb_final_fit <- fit(xgb_workflow, data = train_full)
 test_probs_raw <- predict(xgb_final_fit, test_final, type = "prob") %>%
   bind_cols(test_final %>% select(target_food_insecurity))
 
-# Kalibrasi ulang probabilitas data test menggunakan GLM yang searah
+# KALIBRASI & PREDIKSI FIX: Menggunakan level faktor ketahanan pangan yang tepat
 test_predictions <- test_probs_raw %>%
   mutate(.pred_calibrated = predict(calibration_model, newdata = test_probs_raw, type = "response")) %>%
   mutate(predicted_class = factor(
@@ -286,11 +286,11 @@ final_metrics <- metric_set(accuracy, recall, precision, f_meas, bal_accuracy)(
 print(final_metrics)
 
 # ------------------------------------------------------------------------------
-# 8. AUTOMATED TESTING & DIAGNOSTIC EVIDENCE VISUALIZATION
+# 8. AUTOMATED TESTING & DIAGNOSTIC EVIDENCE VISUALIZATION (FIXED)
 # ------------------------------------------------------------------------------
 message(">> [INFO] Generating and exporting model diagnostic charts...")
 
-# EVIDENCE 1: Verifikasi Bebas Data Leakage (Feature Importance)
+# EVIDENCE 1: Feature Importance
 plot_importance <- vip(extract_fit_parsnip(xgb_final_fit), num_features = 12) +
   theme_minimal(base_size = 12) +
   geom_point(color = "#27ae60", size = 3) +
@@ -304,10 +304,14 @@ plot_importance <- vip(extract_fit_parsnip(xgb_final_fit), num_features = 12) +
 
 ggsave(file.path(PATH_PLOTS, "evidence_1_feature_importance.png"), plot = plot_importance, width = 8, height = 5)
 
-# EVIDENCE 2: Verifikasi Bebas Overfitting (Train vs Test Metrics)
+# EVIDENCE 2: Overfitting Check FIX (Menggunakan .pred_calibrated secara konsisten)
 pred_train_full <- predict(xgb_final_fit, train_full, type = "prob") %>%
   bind_cols(train_full %>% select(target_food_insecurity)) %>%
-  mutate(predicted_class = factor(if_else(.pred_food_insecure >= best_threshold$threshold, "food_insecure", "food_secure"), levels = c("food_insecure", "food_secure")))
+  mutate(.pred_calibrated = predict(calibration_model, newdata = ., type = "response")) %>%
+  mutate(predicted_class = factor(
+    if_else(.pred_calibrated >= best_threshold$threshold, "food_insecure", "food_secure"), 
+    levels = c("food_insecure", "food_secure")
+  ))
 
 metrics_train <- metric_set(f_meas, precision, recall, bal_accuracy)(
   pred_train_full, truth = target_food_insecurity, estimate = predicted_class
@@ -342,31 +346,6 @@ plot_overfitting <- ggplot(df_metrics_compare, aes(x = .metric, y = .estimate, f
   theme(plot.title = element_text(face = "bold"), legend.position = "bottom")
 
 ggsave(file.path(PATH_PLOTS, "evidence_2_overfitting_check.png"), plot = plot_overfitting, width = 8, height = 5)
-
-# EVIDENCE 3: Validitas Distribusi Prediksi (Confusion Matrix & ROC)
-plot_cm <- test_predictions %>%
-  conf_mat(truth = target_food_insecurity, estimate = predicted_class) %>%
-  autoplot(type = "heatmap") +
-  scale_fill_gradient(low = "#f8f9fa", high = "#218c74") +
-  labs(
-    title = "EVIDENCE 3A: Confusion Matrix (Test Set)",
-    subtitle = paste0("Optimized Threshold: ", round(best_threshold$threshold, 2))
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(plot.title = element_text(face = "bold"))
-
-plot_roc <- test_predictions %>%
-  roc_curve(truth = target_food_insecurity, .pred_food_insecure) %>%
-  autoplot() +
-  labs(
-    title = "EVIDENCE 3B: ROC Curve (Test Set)",
-    subtitle = paste0("AUC-ROC Score: ", round(roc_auc_vec(test_predictions$target_food_insecurity, test_predictions$.pred_food_insecure), 4))
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(plot.title = element_text(face = "bold"))
-
-ggsave(file.path(PATH_PLOTS, "evidence_3a_confusion_matrix.png"), plot = plot_cm, width = 5, height = 4)
-ggsave(file.path(PATH_PLOTS, "evidence_3b_roc_curve.png"), plot = plot_roc, width = 5, height = 4)
 
 # ------------------------------------------------------------------------------
 # 9. SAVE ARTIFACTS
