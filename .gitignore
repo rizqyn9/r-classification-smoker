@@ -28,6 +28,7 @@ data/shared/*
 data/smoker/*
 data/extreme_poverty/*
 data/extreme_poverty_national/*
+data/food_insecurity_national/*
 
 # Mac
 .DS_Store
