@@ -116,10 +116,13 @@ krt_clean <- krt_base %>%
 # 3. FEATURE ENGINEERING
 # ------------------------------------------------------------------------------
 BUILD_PREDICTOR_FEATURES <- function(data) {
-  message(">> [STEP 3] Building predictor features (X)...")
+  message(">> [STEP 3] Building expanded predictor features (X)...")
   data %>%
     mutate(
-      # Demografi & Struktur
+      
+      # ------------------------------------------------------------------
+      # GRUP 1: Demografi & Struktur (existing — retained)
+      # ------------------------------------------------------------------
       jml_art_num        = as.numeric(R301),
       rasio_balita       = if_else(jml_art_num > 0,
                                    as.numeric(R302) / jml_art_num, 0),
@@ -132,7 +135,9 @@ BUILD_PREDICTOR_FEATURES <- function(data) {
         art_tanggungan_num / (jml_art_num - art_tanggungan_num), 0
       ),
       
-      # Kerentanan KRT
+      # ------------------------------------------------------------------
+      # GRUP 2: Kerentanan KRT (existing — retained)
+      # ------------------------------------------------------------------
       is_krt_perempuan         = if_else(R405 == "2", 1L, 0L, missing = 0L),
       is_krt_edu_rendah        = if_else(R614 %in% c("0","1","2"),
                                          1L, 0L, missing = 0L),
@@ -144,7 +149,9 @@ BUILD_PREDICTOR_FEATURES <- function(data) {
       is_krt_informal_tani = if_else(str_trim(as.character(R507)) %in%
                                        c("1","2","3"), 1L, 0L, missing = 0L),
       
-      # Hunian Fisik
+      # ------------------------------------------------------------------
+      # GRUP 3: Hunian Fisik (existing — retained)
+      # ------------------------------------------------------------------
       is_rumah_bukan_milik = if_else(str_trim(as.character(R1803)) %in%
                                        c("2","3","4","5"), 1L, 0L, missing = 0L),
       luas_lantai_num      = coalesce(as.numeric(R1802), 0),
@@ -153,12 +160,98 @@ BUILD_PREDICTOR_FEATURES <- function(data) {
       is_padat_sesak       = if_else(luas_per_kapita > 0 & luas_per_kapita < 8,
                                      1L, 0L),
       
-      # Perlindungan Sosial & Aset
+      # ------------------------------------------------------------------
+      # GRUP 4: Perlindungan Sosial & Aset (existing — retained)
+      # ------------------------------------------------------------------
       has_pbi_kesehatan = if_else(str_trim(as.character(R615)) == "1",
                                   1L, 0L, missing = 0L),
       score_aset_modern = rowSums(
         across(c(R2001B, R2001C, R2001F, R2001H, R2001K),
                ~ if_else(.x == "1", 1L, 0L, missing = 0L))
+      ),
+      
+      # ------------------------------------------------------------------
+      # GRUP 5: SUMBER AIR & SANITASI — NEW
+      # Akses air bersih dan sanitasi layak sangat berkorelasi dengan
+      # ketahanan pangan (WHO, 2021; BPS Food Security Index)
+      # ------------------------------------------------------------------
+      is_air_bersih = if_else(
+        str_trim(as.character(R1401)) %in% c("1","2","3","4","5"),
+        1L, 0L, missing = 0L
+      ),
+      is_sanitasi_layak = if_else(
+        str_trim(as.character(R1501)) %in% c("1","2"),
+        1L, 0L, missing = 0L
+      ),
+      is_bahan_bakar_bersih = if_else(
+        str_trim(as.character(R1601)) %in% c("1","2","3"),
+        1L, 0L, missing = 0L
+      ),
+      
+      # ------------------------------------------------------------------
+      # GRUP 6: KONDISI ATAP, DINDING, LANTAI — NEW
+      # Kualitas hunian (atap-dinding-lantai) adalah proxy kemiskinan
+      # struktural yang kuat untuk food insecurity
+      # ------------------------------------------------------------------
+      is_atap_layak   = if_else(str_trim(as.character(R1801)) %in% c("1","2","3"),
+                                1L, 0L, missing = 0L),
+      is_dinding_layak= if_else(str_trim(as.character(R1804)) %in% c("1","2"),
+                                1L, 0L, missing = 0L),
+      is_lantai_layak = if_else(str_trim(as.character(R1805)) %in%
+                                  c("1","2","3","4"),
+                                1L, 0L, missing = 0L),
+      
+      # Composite housing quality score (0–3)
+      score_kualitas_hunian = is_atap_layak + is_dinding_layak + is_lantai_layak,
+      
+      # ------------------------------------------------------------------
+      # GRUP 7: AKSES PANGAN LANGSUNG — NEW
+      # Pengeluaran dan akses pasar adalah prediktor FIES terkuat
+      # ------------------------------------------------------------------
+      # Pengeluaran per kapita (proxy welfare)
+      pengeluaran_pangan_num    = coalesce(as.numeric(R2101), 0),
+      pengeluaran_nonpangan_num = coalesce(as.numeric(R2201), 0),
+      total_pengeluaran         = pengeluaran_pangan_num + pengeluaran_nonpangan_num,
+      share_pangan              = if_else(
+        total_pengeluaran > 0,
+        pengeluaran_pangan_num / total_pengeluaran, 0
+      ),
+      # Share pangan > 0.6 = Engel's Law proxy untuk kemiskinan pangan
+      is_share_pangan_tinggi = if_else(share_pangan > 0.6, 1L, 0L),
+      
+      # ------------------------------------------------------------------
+      # GRUP 8: KEPEMILIKAN LAHAN & USAHA — NEW
+      # Akses lahan produktif berkorelasi langsung dengan food security
+      # ------------------------------------------------------------------
+      has_lahan_pertanian = if_else(str_trim(as.character(R1901)) == "1",
+                                    1L, 0L, missing = 0L),
+      has_usaha_sendiri   = if_else(str_trim(as.character(R504)) == "1",
+                                    1L, 0L, missing = 0L),
+      
+      # ------------------------------------------------------------------
+      # GRUP 9: KOMPOSISI UMUR ART — NEW
+      # Rasio lansia dan anak sekolah sebagai proxy beban tanggungan
+      # ------------------------------------------------------------------
+      rasio_lansia      = if_else(jml_art_num > 0,
+                                  coalesce(as.numeric(R305), 0) / jml_art_num, 0),
+      rasio_anak_sekolah= if_else(jml_art_num > 0,
+                                  coalesce(as.numeric(R306), 0) / jml_art_num, 0),
+      
+      # ------------------------------------------------------------------
+      # GRUP 10: COMPOSITE VULNERABILITY INDEX — NEW
+      # Skor kerentanan komposit — akumulasi faktor risiko
+      # ------------------------------------------------------------------
+      vulnerability_index = (
+        is_krt_perempuan +
+          is_krt_edu_rendah +
+          is_krt_informal_tani +
+          is_rumah_bukan_milik +
+          is_padat_sesak +
+          (1L - has_pbi_kesehatan) +
+          (1L - is_air_bersih) +
+          (1L - is_sanitasi_layak) +
+          is_share_pangan_tinggi +
+          (1L - has_lahan_pertanian)
       )
     )
 }
