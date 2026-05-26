@@ -288,21 +288,24 @@ cal_preds_raw <- predict(xgb_fit_core, cal_set, type = "prob") %>%
 calibration_model <- glm(target_numeric ~ .pred_food_insecure, data = cal_preds_raw, family = binomial(link = "logit"))
 
 # ------------------------------------------------------------------------------
-# 8. THRESHOLD SWEEP VIA OOF PREDICTIONS
+# 7 & 8. RESTRUCTURED: OOF THRESHOLD SWEEP & CALIBRATION METADATA
 # ------------------------------------------------------------------------------
-message(">> [STEP 8] Finding optimal decision boundary...")
+message(">> [STEP 7 & 8] Executing Out-of-Fold predictions for robust thresholding...")
+
+# Hasilkan prediksi OOF murni dari CV Folds (Tanpa intervensi calibration model luar)
 oof_preds <- map_dfr(cv_folds$splits, function(split) {
   fold_train <- analysis(split)
   fold_val   <- assessment(split)
   fold_fit   <- fit(xgb_workflow, data = fold_train)
   
   predict(fold_fit, fold_val, type = "prob") %>%
-    bind_cols(fold_val %>% select(target_food_insecurity)) %>%
-    mutate(.pred_calibrated = predict(calibration_model, newdata = pick(everything()), type = "response"))
+    bind_cols(fold_val %>% select(target_food_insecurity))
 })
 
+message(">> Evaluating optimal threshold over raw OOF probabilities...")
 threshold_lookup <- map_dfr(CFG$thresh_seq, function(t) {
-  preds <- factor(if_else(oof_preds$.pred_calibrated >= t, "food_insecure", "food_secure"), levels = c("food_insecure", "food_secure"))
+  preds <- factor(if_else(oof_preds$.pred_food_insecure >= t, "food_insecure", "food_secure"), 
+                  levels = c("food_insecure", "food_secure"))
   tibble(
     threshold    = t,
     f1           = f_meas_vec(oof_preds$target_food_insecurity, preds, event_level = "first"),
@@ -312,26 +315,45 @@ threshold_lookup <- map_dfr(CFG$thresh_seq, function(t) {
   )
 })
 
+# Cari batas optimal menggunakan probabilitas mentah XGBoost
 best_boundary <- threshold_lookup %>%
   filter(recall >= CFG$recall_floor, precision >= CFG$precision_floor) %>%
-  arrange(desc(f1)) %>% slice(1)
+  arrange(desc(f1)) %>% 
+  slice(1)
 
 if (nrow(best_boundary) == 0) {
+  message("!! [WARNING] Floor criteria not met. Falling back to global max F1.")
   best_boundary <- threshold_lookup %>% arrange(desc(f1)) %>% slice(1)
 }
 best_threshold <- best_boundary$threshold
+message(">> [OPTIMAL] Raw Probability Decision Boundary set at: ", best_threshold)
+
 
 # ------------------------------------------------------------------------------
-# 9. FINAL REFIT & EVALUATION ON LOCKED TEST SET
+# 9. FINAL REFIT & ISOLATED CALIBRATION ON LOCKED TEST SET
 # ------------------------------------------------------------------------------
-message(">> [STEP 9] Refitting final model on full training set...")
-xgb_final_fit <- fit(xgb_workflow, data = train_full)
+message(">> [STEP 9] Refitting final model components on master splits...")
 
-test_predictions <- predict(xgb_final_fit, test_final, type = "prob") %>%
+# Latih XGBoost Core pada train_core murni
+xgb_fit_core <- fit(xgb_workflow, data = train_core)
+
+# Latih Kalibrator Platt Scaling pada cal_set secara independen terisolasi
+cal_preds_raw <- predict(xgb_fit_core, cal_set, type = "prob") %>%
+  bind_cols(cal_set %>% select(target_food_insecurity)) %>%
+  mutate(target_numeric = if_else(target_food_insecurity == "food_insecure", 1L, 0L))
+
+calibration_model <- glm(target_numeric ~ .pred_food_insecure, data = cal_preds_raw, family = binomial(link = "logit"))
+
+# Evaluasi Final pada data Uji Terkunci (Test Set)
+message(">> Generating predictions on untouched Test Set...")
+test_predictions <- predict(xgb_fit_core, test_final, type = "prob") %>%
   bind_cols(test_final %>% select(target_food_insecurity)) %>%
   mutate(
-    .pred_calibrated = predict(calibration_model, newdata = ., type = "response"),
-    predicted_class  = factor(if_else(.pred_calibrated >= best_threshold, "food_insecure", "food_secure"), 
+    # Lakukan kalibrasi probabilitas pasca-modeling untuk laporan publikasi (Aman dari leakage)
+    .pred_calibrated = predict(calibration_model, newdata = pick(everything()), type = "response"),
+    
+    # Penentuan kelas keputusan menggunakan threshold mentah dari ekosistem OOF murni
+    predicted_class  = factor(if_else(.pred_food_insecure >= best_threshold, "food_insecure", "food_secure"), 
                               levels = c("food_insecure", "food_secure"))
   )
 
@@ -341,7 +363,7 @@ final_metrics <- bind_rows(
   pr_auc(test_predictions, truth = target_food_insecurity, .pred_food_insecure, event_level = "first")
 )
 
-message(">> [SUCCESS] Final metrics evaluated on untouched Test Set:")
+message(">> [SUCCESS] Honest final metrics evaluated:")
 print(final_metrics)
 
 # ------------------------------------------------------------------------------
