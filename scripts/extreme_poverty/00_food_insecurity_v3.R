@@ -25,7 +25,8 @@ pkgs <- c(
   "vip",
   "ggplot2",
   "doParallel",
-  "parallel"
+  "parallel",
+  "arrow"
 )
 
 invisible(lapply(pkgs, library, character.only = TRUE))
@@ -75,6 +76,7 @@ CFG <- list(
   n_cores = max(1L, parallel::detectCores() - 1L)
 )
 
+
 CFG$path_models <- here("models", CFG$feature)
 CFG$path_output <- here("outputs", CFG$feature)
 
@@ -118,6 +120,8 @@ rt_raw <- rt_raw %>%
       ~ str_trim(as.character(.x))
     )
   )
+
+
 
 # ------------------------------------------------------------------------------
 # 4. HEAD OF HOUSEHOLD FILTER
